@@ -10,16 +10,18 @@
     eventsPath: 'training/log/events.jsonl',
   };
   const API = `https://api.github.com/repos/${CFG.owner}/${CFG.repo}`;
+  const DOUBLE_TAP_MS = 350;
 
   // ====== STATE ======
   const state = {
     pat: localStorage.getItem('pat') || '',
     plan: null,
     today: todayLocalDate(),
-    todayEntries: [],
+    viewDate: null,
     syncedEvents: [],
     eventsSha: null,
     pendingEvents: loadPending(),
+    lastTap: {}, // { [slug]: { at: number, eventRef: object } }
     status: 'loading', // 'loading' | 'ready' | 'no-token' | 'error'
     error: null,
   };
@@ -47,6 +49,10 @@
     const d = new Date(iso + 'T00:00:00');
     const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
     return `${days[d.getDay()]} · ${iso}`;
+  }
+  function sortedDayKeys() {
+    if (!state.plan) return [];
+    return Object.keys(state.plan.days).sort();
   }
 
   // ====== GITHUB API ======
@@ -110,9 +116,12 @@
       ]);
       if (!planRes) throw new Error(`${CFG.planPath} not found — run \`make plan\` in the data repo.`);
       state.plan = JSON.parse(planRes.text);
-      state.todayEntries = state.plan.days[state.today] || [];
       state.syncedEvents = parseEvents(eventsRes ? eventsRes.text : '');
       state.eventsSha = eventsRes ? eventsRes.sha : null;
+      const keys = sortedDayKeys();
+      if (keys.includes(state.today)) state.viewDate = state.today;
+      else if (keys.length) state.viewDate = keys[0];
+      else state.viewDate = state.today;
       state.status = 'ready';
     } catch (e) {
       state.status = 'error';
@@ -131,10 +140,10 @@
   }
 
   // ====== PROGRESS ======
-  function doneFor(entry) {
+  function doneFor(entry, date) {
     const all = [...state.syncedEvents, ...state.pendingEvents];
     const matching = all.filter((ev) =>
-      (ev.local_date || (ev.ts || '').slice(0, 10)) === state.today &&
+      (ev.local_date || (ev.ts || '').slice(0, 10)) === date &&
       ev.exercise === entry.slug
     );
     if (entry.unit === 'reps' || entry.unit === 'walks') {
@@ -149,12 +158,17 @@
     return 0;
   }
 
-  // ====== TAP ======
-  function logOne(entry) {
-    const now = new Date();
+  function pendingCountFor(slug, date) {
+    return state.pendingEvents.filter((ev) =>
+      (ev.local_date || (ev.ts || '').slice(0, 10)) === date && ev.exercise === slug
+    ).length;
+  }
+
+  // ====== LOG + UNDO ======
+  function createEvent(entry, date) {
     const ev = {
-      ts: now.toISOString(),
-      local_date: state.today,
+      ts: new Date().toISOString(),
+      local_date: date,
       exercise: entry.slug,
     };
     if (entry.unit === 'reps' || entry.unit === 'walks') {
@@ -166,9 +180,38 @@
     } else if (entry.unit === 'session') {
       ev.kind = entry.slug === 'run' ? 'run' : 'session';
     }
+    return ev;
+  }
+
+  function logOne(entry) {
+    const ev = createEvent(entry, state.viewDate);
     state.pendingEvents.push(ev);
     savePending();
-    render();
+    return ev;
+  }
+
+  function undoMostRecentPending(slug, date) {
+    // Remove the most recently added pending event for this slug+date.
+    for (let i = state.pendingEvents.length - 1; i >= 0; i--) {
+      const ev = state.pendingEvents[i];
+      const d = ev.local_date || (ev.ts || '').slice(0, 10);
+      if (d === date && ev.exercise === slug) {
+        state.pendingEvents.splice(i, 1);
+        savePending();
+        return ev;
+      }
+    }
+    return null;
+  }
+
+  function undoByRef(eventRef) {
+    const idx = state.pendingEvents.indexOf(eventRef);
+    if (idx >= 0) {
+      state.pendingEvents.splice(idx, 1);
+      savePending();
+      return true;
+    }
+    return false;
   }
 
   // ====== SYNC ======
@@ -179,7 +222,6 @@
     btn.textContent = 'Syncing…';
     btn.disabled = true;
     try {
-      // Refetch events.jsonl for freshest SHA (handles external writes).
       const cur = await ghGet(CFG.eventsPath);
       let baseText = cur ? cur.text : '';
       const sha = cur ? cur.sha : null;
@@ -190,10 +232,11 @@
       await ghPut(CFG.eventsPath, full, sha, `app: log ${n} event${n === 1 ? '' : 's'}`);
       state.syncedEvents = [...state.syncedEvents, ...state.pendingEvents];
       state.pendingEvents = [];
+      state.lastTap = {};
       savePending();
-      toast('Synced ✓');
+      toast('Synced ✓', 'accent');
     } catch (e) {
-      toast(`Sync failed: ${e.message}`, true);
+      toast(`Sync failed: ${e.message}`, 'error');
     } finally {
       btn.disabled = false;
     }
@@ -241,88 +284,168 @@
       return;
     }
 
-    // ready
-    const header = document.createElement('header');
-    const h1 = document.createElement('h1');
-    h1.textContent = dayLabel(state.today);
-    header.appendChild(h1);
-    if (state.plan.week_start) {
-      const sub = document.createElement('div');
-      sub.className = 'sub';
-      sub.textContent = `Week of ${state.plan.week_start}`;
-      header.appendChild(sub);
-    }
-    app.appendChild(header);
+    // ===== ready =====
+    app.appendChild(renderHeader());
 
-    if (state.todayEntries.length === 0) {
+    const entries = (state.plan.days[state.viewDate] || []);
+    if (entries.length === 0) {
       const em = document.createElement('div');
       em.className = 'empty';
-      em.innerHTML = `<p>Nothing planned for ${state.today}.</p><p style="margin-top:0.5rem;color:#666">Rest day, or run <code>make plan</code> in the data repo.</p>`;
+      em.innerHTML = `<p>Nothing planned for ${state.viewDate}.</p><p style="margin-top:0.5rem;color:var(--dim)">Rest day, or rerun <code>make plan</code>.</p>`;
       app.appendChild(em);
-    }
-
-    for (const entry of state.todayEntries) {
-      app.appendChild(renderEntry(entry));
+    } else {
+      for (const entry of entries) app.appendChild(renderEntry(entry));
     }
 
     bar.hidden = false;
     updateSyncBtn();
   }
 
+  function renderHeader() {
+    const header = document.createElement('header');
+
+    const eyebrow = document.createElement('div');
+    eyebrow.className = 'eyebrow';
+    const dot = document.createElement('span');
+    dot.className = 'dot';
+    eyebrow.appendChild(dot);
+    const week = document.createElement('span');
+    week.textContent = state.plan.week_start ? `Week of ${state.plan.week_start}` : 'Training Logger';
+    eyebrow.appendChild(week);
+    header.appendChild(eyebrow);
+
+    const nav = document.createElement('div');
+    nav.className = 'day-nav';
+
+    const keys = sortedDayKeys();
+    const idx = keys.indexOf(state.viewDate);
+
+    const prev = document.createElement('button');
+    prev.textContent = '‹';
+    prev.disabled = idx <= 0;
+    prev.setAttribute('aria-label', 'Previous day');
+    prev.addEventListener('click', () => {
+      if (idx > 0) { state.viewDate = keys[idx - 1]; render(); }
+    });
+    nav.appendChild(prev);
+
+    const stack = document.createElement('div');
+    stack.className = 'date-stack';
+    const h1 = document.createElement('h1');
+    h1.textContent = dayLabel(state.viewDate);
+    stack.appendChild(h1);
+    if (state.viewDate === state.today) {
+      const tag = document.createElement('span');
+      tag.className = 'today-tag';
+      tag.textContent = '· Today ·';
+      stack.appendChild(tag);
+    } else if (state.viewDate > state.today) {
+      const tag = document.createElement('span');
+      tag.className = 'today-tag';
+      tag.style.color = 'var(--dim)';
+      tag.textContent = '· Future (read-only) ·';
+      stack.appendChild(tag);
+    }
+    nav.appendChild(stack);
+
+    const next = document.createElement('button');
+    next.textContent = '›';
+    next.disabled = idx < 0 || idx >= keys.length - 1;
+    next.setAttribute('aria-label', 'Next day');
+    next.addEventListener('click', () => {
+      if (idx >= 0 && idx < keys.length - 1) { state.viewDate = keys[idx + 1]; render(); }
+    });
+    nav.appendChild(next);
+
+    header.appendChild(nav);
+    return header;
+  }
+
   function renderEntry(entry) {
-    const done = doneFor(entry);
+    const done = doneFor(entry, state.viewDate);
     const isDone = done >= entry.target_total;
     const pct = Math.min(100, (done / entry.target_total) * 100);
+    const pending = pendingCountFor(entry.slug, state.viewDate);
+    const canLog = state.viewDate <= state.today;
 
     const wrap = document.createElement('div');
-    wrap.className = 'ex' + (isDone ? ' done' : '');
+    wrap.className = 'ex' + (isDone ? ' done' : '') + (pending > 0 ? ' has-pending' : '');
+    wrap.style.setProperty('--pct', `${pct}%`);
 
-    let spec = '';
-    if (entry.unit === 'reps') spec = `${entry.sets} × ${entry.per_set} reps`;
-    else if (entry.unit === 'walks') spec = `${entry.target_total} walk${entry.target_total === 1 ? '' : 's'}`;
-    else if (entry.unit === 'duration_s') spec = `${entry.sets} × ${entry.per_set}s`;
-    else if (entry.unit === 'session') spec = 'session';
-
-    const title = document.createElement('div');
-    title.className = 'title';
-    const name = document.createElement('span');
-    name.textContent = entry.display;
-    const specEl = document.createElement('span');
-    specEl.className = 'spec';
-    specEl.textContent = spec;
-    title.appendChild(name);
-    title.appendChild(specEl);
-    wrap.appendChild(title);
+    const head = document.createElement('div');
+    head.className = 'ex-header';
+    const title = document.createElement('span');
+    title.className = 'ex-title';
+    title.textContent = entry.display;
+    const spec = document.createElement('span');
+    spec.className = 'ex-spec';
+    if (entry.unit === 'reps') spec.textContent = `${entry.sets} × ${entry.per_set}`;
+    else if (entry.unit === 'walks') spec.textContent = `${entry.target_total}×`;
+    else if (entry.unit === 'duration_s') spec.textContent = `${entry.sets} × ${entry.per_set}s`;
+    else if (entry.unit === 'session') spec.textContent = 'session';
+    head.appendChild(title);
+    head.appendChild(spec);
+    wrap.appendChild(head);
 
     const pb = document.createElement('div');
     pb.className = 'progress-bar';
-    const fill = document.createElement('div');
-    fill.className = 'fill';
-    fill.style.width = `${pct}%`;
-    pb.appendChild(fill);
+    pb.style.setProperty('--pct', `${pct}%`);
     wrap.appendChild(pb);
 
-    const meta = document.createElement('div');
-    meta.className = 'meta';
+    const foot = document.createElement('div');
+    foot.className = 'ex-footer';
     const count = document.createElement('span');
-    count.className = 'done-count';
+    count.className = 'ex-count';
     if (entry.unit === 'reps') count.textContent = `${done} / ${entry.target_total} reps`;
-    else if (entry.unit === 'walks') count.textContent = `${done} / ${entry.target_total} walks`;
+    else if (entry.unit === 'walks') count.textContent = `${done} / ${entry.target_total}`;
     else if (entry.unit === 'duration_s') count.textContent = `${done}s / ${entry.target_total}s`;
     else if (entry.unit === 'session') count.textContent = isDone ? 'done' : '—';
-    meta.appendChild(count);
+    if (pending > 0) {
+      const dot = document.createElement('span');
+      dot.className = 'pending-dot';
+      dot.setAttribute('title', `${pending} pending`);
+      count.appendChild(dot);
+    }
+    foot.appendChild(count);
 
     const btn = document.createElement('button');
     btn.className = 'tap';
     if (entry.unit === 'session') btn.textContent = isDone ? '✓' : 'Done';
     else if (entry.unit === 'duration_s') btn.textContent = `+${entry.per_set}s`;
     else btn.textContent = `+${entry.per_set}`;
+    btn.disabled = !canLog;
+
     btn.addEventListener('click', () => {
-      if (entry.unit === 'session' && isDone) return;
-      logOne(entry);
+      if (!canLog) return;
+
+      // Session toggle: simple — tap to log if not done, tap to undo if done via pending.
+      if (entry.unit === 'session') {
+        if (isDone && pending > 0) {
+          undoMostRecentPending(entry.slug, state.viewDate);
+          toast(`${entry.display}: undone`);
+        } else if (!isDone) {
+          logOne(entry);
+        }
+        render();
+        return;
+      }
+
+      // Reps / walks / holds: single tap logs; double-tap (second click within window) undoes the first.
+      const now = Date.now();
+      const lt = state.lastTap[entry.slug];
+      if (lt && now - lt.at < DOUBLE_TAP_MS && lt.eventRef) {
+        if (undoByRef(lt.eventRef)) {
+          toast(`${entry.display}: undone`);
+        }
+        state.lastTap[entry.slug] = null;
+      } else {
+        const ev = logOne(entry);
+        state.lastTap[entry.slug] = { at: now, eventRef: ev };
+      }
+      render();
     });
-    meta.appendChild(btn);
-    wrap.appendChild(meta);
+    foot.appendChild(btn);
+    wrap.appendChild(foot);
 
     return wrap;
   }
@@ -351,16 +474,15 @@
   }
   function refreshPendingView() {
     const el = document.getElementById('pending-view');
-    el.textContent =
-      state.pendingEvents.length === 0
-        ? '—'
-        : state.pendingEvents.map((e) => JSON.stringify(e)).join('\n');
+    el.textContent = state.pendingEvents.length === 0
+      ? '—'
+      : state.pendingEvents.map((e) => JSON.stringify(e)).join('\n');
   }
 
   // ====== TOAST ======
-  function toast(msg, isError = false) {
+  function toast(msg, kind = '') {
     const t = document.createElement('div');
-    t.className = 'toast' + (isError ? ' error' : '');
+    t.className = 'toast' + (kind ? ' ' + kind : '');
     t.textContent = msg;
     document.body.appendChild(t);
     setTimeout(() => t.remove(), 2400);
@@ -373,9 +495,9 @@
     document.getElementById('settings-close').addEventListener('click', closeSettings);
     document.getElementById('pat-save').addEventListener('click', () => {
       const val = document.getElementById('pat-input').value.trim();
-      if (!val) return toast('Paste a token first.', true);
+      if (!val) return toast('Paste a token first.', 'error');
       savePat(val);
-      toast('Token saved.');
+      toast('Token saved.', 'accent');
       closeSettings();
       boot();
     });
@@ -387,6 +509,7 @@
     document.getElementById('pending-clear').addEventListener('click', () => {
       if (!confirm(`Discard ${state.pendingEvents.length} pending events without syncing?`)) return;
       state.pendingEvents = [];
+      state.lastTap = {};
       savePending();
       refreshPendingView();
       toast('Pending discarded.');
