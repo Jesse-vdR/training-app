@@ -430,14 +430,19 @@
         return;
       }
 
-      // Reps / walks / holds: single tap logs; double-tap (second click within window) undoes the first.
+      // Reps / walks / holds:
+      //   - single tap: +1 pending
+      //   - double-tap (second tap within DOUBLE_TAP_MS): net -1 from pre-pair state.
+      //     Removes the event just logged by the first tap AND one more pending event
+      //     for this slug+date (if any exist). Synced events are never touched.
       const now = Date.now();
       const lt = state.lastTap[entry.slug];
       if (lt && now - lt.at < DOUBLE_TAP_MS && lt.eventRef) {
-        if (undoByRef(lt.eventRef)) {
-          toast(`${entry.display}: undone`);
-        }
+        const firstUndone = undoByRef(lt.eventRef);
+        const secondUndone = undoMostRecentPending(entry.slug, state.viewDate);
         state.lastTap[entry.slug] = null;
+        if (secondUndone) toast(`${entry.display} −1`, 'accent');
+        else if (firstUndone) toast(`${entry.display}: nothing left to undo`);
       } else {
         const ev = logOne(entry);
         state.lastTap[entry.slug] = { at: now, eventRef: ev };
