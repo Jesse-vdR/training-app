@@ -167,6 +167,7 @@
   // ====== LOG + UNDO ======
   function createEvent(entry, date) {
     const ev = {
+      v: 1,
       ts: new Date().toISOString(),
       local_date: date,
       exercise: entry.slug,
