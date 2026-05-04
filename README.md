@@ -1,6 +1,11 @@
 # Training-app
 
-Mobile PWA for logging calisthenics sets throughout the day. Each tap appends one structured event to a file in a separate, private repo; a script in that repo folds the events back into a human-readable weekly log on Sunday.
+Mobile PWA for logging calisthenics sets and tracking long-horizon goals.
+
+- **Today** view: tap to log sets, holds, runs against the current week's plan.
+- **Project** view: goal cards with pace, per-track stage ladders, intensity-weighted tonnage bars, 26-week heatmap. Pass stages from the same screen.
+
+Each tap appends one structured event to a file in a separate, private repo; a script in that repo folds the events back into a human-readable weekly log on Sunday. Goals and stage ladders are hand-authored JSON in the same private repo — the PWA fetches them on every launch and recomputes all graphs client-side.
 
 Live at **https://jesse-vdr.github.io/Training-app/**.
 
@@ -14,22 +19,24 @@ flowchart LR
     end
     subgraph Private["Jesse-vdR/Jesse  (private)"]
       direction TB
+      DEFS["training/goals.json<br/>training/tracks.json<br/>training/long_term.md<br/>(hand-authored definitions)"]
       PLAN["training/plan.json<br/>(generated from weekly log)"]
-      EV["training/log/events.jsonl<br/>(append-only tap log)"]
+      EV["training/log/events.jsonl<br/>(append-only event log,<br/>incl. stage_pass)"]
       WEEK["training/log/weekly/YYYY-MM-DD.md<br/>(human log, ticked by fold)"]
       SCRIPTS["training/scripts/<br/>plan_to_json.py · fold_events.py"]
     end
     Pages["GitHub Pages<br/>jesse-vdr.github.io/Training-app"]
     Phone["📱 Phone<br/>PWA on home screen"]
     API["api.github.com<br/>(authed with PAT)"]
-    Laptop["💻 Laptop<br/>make plan · make fold"]
+    Laptop["💻 Laptop<br/>make plan · make fold<br/>edit goals/tracks"]
 
     SRC -- "git push" --> Pages
     Pages -- "HTML / JS / CSS" --> Phone
-    Phone <-- "GET plan.json<br/>PUT events.jsonl<br/>(PAT in Authorization header)" --> API
+    Phone <-- "GET plan/goals/tracks/events<br/>PUT events.jsonl<br/>(PAT in Authorization header)" --> API
     API <-- "reads / writes<br/>training/*" --> Private
     Laptop -- "edits weekly log" --> WEEK
     Laptop -- "make plan" --> PLAN
+    Laptop -- "edits" --> DEFS
     EV -- "make fold" --> WEEK
     SCRIPTS -.-> PLAN
     SCRIPTS -.-> WEEK
@@ -135,19 +142,6 @@ Each tap appends one JSON object as a single line to `training/log/events.jsonl`
 
 Append-only: the PWA never edits or deletes prior events remotely. Undo only affects pending (unsynced) events locally.
 
-## Keeping `plan.json` fresh
-
-Every Monday (or whenever the weekly log changes) in `Jesse-vdR/Jesse`:
-
-```bash
-cd training
-make plan    # regenerates plan.json from log/weekly/<this monday>.md
-git commit -am "plan: refresh for week of YYYY-MM-DD"
-git push
-```
-
-The PWA reads `plan.json` on each launch, so a git push propagates within seconds.
-
 ## Goals & tracks
 
 The Project view is driven by two more files in `Jesse-vdR/Jesse/training/`:
@@ -159,23 +153,74 @@ Both are hand-authored. They're small enough not to need tooling. Edit, push, re
 
 A goal's progress is the weighted average of `current_stage / target_stage` across its tracks. The pace marker on the goal bar is `(today − start_date) / (deadline − start_date)`. Volume (intensity score) is shown separately in the tonnage bars and heatmap — it's an input, not a progress measure.
 
-## Sunday review
+## Cadence
+
+### During training (phone)
+
+Tap reps as you go. Hit a milestone? Project tab → tap the goal → **Pass stage N** on the relevant track → optional note → Sync. One Sync at the end of the session is enough; the queue persists across app restarts.
+
+### Sunday evening (laptop, ~15 min)
 
 ```bash
-cd training
-make fold    # ticks weekly-log checkboxes for every target met by events
-git diff     # inspect what was flipped
-git commit -am "fold: week of YYYY-MM-DD"
+cd ~/personal_projects/training
+make fold            # ticks last week's checkboxes from events
+git diff             # eyeball what flipped
 ```
 
-`fold` is idempotent and never un-ticks. Partials are still discussed verbally, not inline.
+Reflect — three questions, two minutes:
+
+1. **What did the body say no to this week?** (skipped sets, painful reps, bad sleep)
+2. **Which track moved?** (Project view — any ladder dot fill in?)
+3. **What's the one thing I'm changing for next week?** (one — not five)
+
+Edit / create `log/weekly/<next-monday>.md`. Then:
+
+```bash
+make plan            # rebuilds plan.json from the new week's log
+git add training/log training/plan.json
+git commit -m "fold W{n} + plan W{n+1}: <answer to #3>"
+git push
+```
+
+The PWA picks up the new plan within seconds of the push. `fold` is idempotent and never un-ticks.
+
+### Quarterly (Apr / Jul / Oct / Jan, ~30 min)
+
+- Open Project view, scan the goal cards. Read `long_term.md` against current state.
+- Goal *consistently ahead* → raise the bar (earlier deadline, higher target stage).
+- Goal *behind two quarters in a row* → that's the trigger to amend, not adjust.
+- Add a dated entry to the **Amendments** section at the bottom of `long_term.md` describing what changed and why.
+- Then make the change in data: edit `goals.json` (push a deadline, mark `"status": "met"`, add a goal) or `tracks.json` (insert/split a stage).
+- Recalibrate `difficulty_factor` if subjective effort doesn't match the tonnage bar heights.
+
+### Ad-hoc
+
+- **New exercise:** add to `scripts/catalog.py` *and* the `DIFFICULTY` map at the top of `app.js` (see Known warts), then reference it in the relevant `tracks.json` stage.
+- **Goal met:** in `goals.json`, set `"status": "met"`. It greys out and drops to a Completed section.
+- **Goal paused / dropped:** same with `"paused"` or `"dropped"`.
+
+## What's automatic vs. manual
+
+Everything in the Project view recomputes on every PWA launch — no refresh button needed.
+
+| Updates automatically (on Sync / next launch) | Requires a `git push` from laptop |
+|---|---|
+| Today view progress bars | The week's plan (`make plan`) |
+| Goal pace, ladder dots, tonnage bars, heatmap | New goals / stages / status changes |
+| Stage progress (after tapping "Pass stage N") | Difficulty factors |
+| Days remaining, expected-by-today tick |  |
+
+## Known warts
+
+- **Difficulty factors live in two places.** `scripts/catalog.py` (used by `fold` and any future Python tooling) and the `DIFFICULTY` constant at the top of `app.js` (used by tonnage bars + heatmap). Changing one without the other will silently desync. Eventual fix: a Makefile target that emits `catalog.json` from `catalog.py`, fetched by the PWA.
+- **`events.jsonl` is one file.** At ~10 events/day it'll cross ~1 MB sometime in 2027. When it does, shard by year (`events-2026.jsonl`, etc.) and update the parse path in `app.js`.
 
 ## Layout
 
 ```
-├── index.html         # shell + settings panel
-├── app.js             # state, rendering, GitHub API, sync, double-tap undo
-├── style.css          # dark theme, purple→orange gradient
+├── index.html         # shell, tab nav, settings panel
+├── app.js             # state, GitHub API, today + project views, sync, undo
+├── style.css          # dark theme, purple→orange gradient, ladder/heatmap
 ├── manifest.json      # PWA manifest
 ├── sw.js              # service worker (cache app shell, bypass api.github.com)
 ├── icon-192.png       # placeholder pull-up-bar silhouette
