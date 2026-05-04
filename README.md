@@ -71,6 +71,12 @@ sequenceDiagram
 
 ## Features
 
+- **Two views** — bottom tab switches between **Today** (log sets) and **Project** (goal progress, stages, tonnage, heatmap). Choice persists per-device.
+- **Goal cards** — one per active goal. Filled bar = current weighted progress, vertical tick = where you should be by today given the deadline. Pace chip is green/amber/red.
+- **Track ladder** — tap a goal to expand. Each contributing track shows discrete stage dots, the next stage's acceptance test, and a "Pass stage N" button.
+- **Stage logging** — tapping "Pass stage N" prompts for an optional note and appends a `stage_pass` event. Same sync flow as set events. Cancellation aborts.
+- **8-week tonnage bars** — under each goal, one row per track. Bars are intensity-weighted volume, normalised across the goal's tracks so the tallest bar in the cluster is full-height.
+- **26-week heatmap** — bottom of the Project view. GitHub-style 7×26 grid, color = total daily intensity score. Future cells are dimmed.
 - **Day-by-day navigation** — prev/next arrows cycle through the week. Future days are read-only; past days allow retro-logging.
 - **Purple → orange progress gradient** — each bar fills from deep purple (empty) through pink (halfway) to orange (target met). Matches the `brynq-ai-toolkit` style guide.
 - **Per-set tapping** — one tap = one set at spec reps/seconds. The catalog lives in `Jesse-vdR/Jesse/training/scripts/catalog.py`.
@@ -112,16 +118,20 @@ Each tap appends one JSON object as a single line to `training/log/events.jsonl`
 {"ts":"2026-04-20T19:21:24.286Z","local_date":"2026-04-20","exercise":"wide_pushups","kind":"set","reps":10}
 {"ts":"2026-04-20T19:21:32.708Z","local_date":"2026-04-20","exercise":"pike_compression","kind":"hold","duration_s":30}
 {"ts":"2026-04-22T08:45:12.000Z","local_date":"2026-04-22","exercise":"run","kind":"run"}
+{"ts":"2026-09-12T11:00:00.000Z","local_date":"2026-09-12","kind":"stage_pass","track":"pulling","stage":2,"note":"5 strict CTB"}
 ```
 
 | Field | Notes |
 |---|---|
 | `ts` | UTC ISO 8601. For absolute ordering. |
 | `local_date` | Calendar date as of the tap (YYYY-MM-DD). The fold script groups by this, so late-night taps don't spill into the next UTC day. |
-| `exercise` | Slug from the catalog (`pullups`, `wide_pushups`, `pike_pushups`, `dips`, `wall_walk`, `ctw_handstand`, `pancake`, `pike_compression`, `run`, `bouldering`). |
-| `kind` | `set` \| `hold` \| `run` \| `session` \| `bouldering` |
+| `exercise` | Slug from the catalog (`pullups`, `wide_pushups`, `pike_pushups`, `dips`, `wall_walk`, `ctw_handstand`, `pancake`, `pike_compression`, `run`, `bouldering`). Absent on `stage_pass`. |
+| `kind` | `set` \| `hold` \| `run` \| `session` \| `bouldering` \| `stage_pass` |
 | `reps` | Present on `set` events — per-set count. |
 | `duration_s` | Present on `hold` events — per-set seconds. |
+| `track` | Present on `stage_pass` — track id from `tracks.json`. |
+| `stage` | Present on `stage_pass` — integer stage number passed. |
+| `note` | Optional on `stage_pass` — short free-text description. |
 
 Append-only: the PWA never edits or deletes prior events remotely. Undo only affects pending (unsynced) events locally.
 
@@ -137,6 +147,17 @@ git push
 ```
 
 The PWA reads `plan.json` on each launch, so a git push propagates within seconds.
+
+## Goals & tracks
+
+The Project view is driven by two more files in `Jesse-vdR/Jesse/training/`:
+
+- `goals.json` — list of goals with deadlines, acceptance criteria, and the contributing tracks (with weights + target stages).
+- `tracks.json` — list of tracks, each a ladder of stages with acceptance tests and the exercises that feed them.
+
+Both are hand-authored. They're small enough not to need tooling. Edit, push, refresh.
+
+A goal's progress is the weighted average of `current_stage / target_stage` across its tracks. The pace marker on the goal bar is `(today − start_date) / (deadline − start_date)`. Volume (intensity score) is shown separately in the tonnage bars and heatmap — it's an input, not a progress measure.
 
 ## Sunday review
 

@@ -8,21 +8,29 @@
     branch: 'main',
     planPath: 'training/plan.json',
     eventsPath: 'training/log/events.jsonl',
+    goalsPath: 'training/goals.json',
+    tracksPath: 'training/tracks.json',
   };
   const API = `https://api.github.com/repos/${CFG.owner}/${CFG.repo}`;
   const DOUBLE_TAP_MS = 350;
+  const HEATMAP_WEEKS = 26;
+  const TONNAGE_WEEKS = 8;
 
   // ====== STATE ======
   const state = {
     pat: localStorage.getItem('pat') || '',
     plan: null,
+    goals: [],
+    tracks: {},
     today: todayLocalDate(),
     viewDate: null,
+    view: localStorage.getItem('view') || 'today', // 'today' | 'project'
+    expandedGoalId: null,
     syncedEvents: [],
     eventsSha: null,
     pendingEvents: loadPending(),
-    lastTap: {}, // { [slug]: { at: number, eventRef: object } }
-    status: 'loading', // 'loading' | 'ready' | 'no-token' | 'error'
+    lastTap: {},
+    status: 'loading',
     error: null,
   };
 
@@ -39,6 +47,11 @@
     if (pat) localStorage.setItem('pat', pat);
     else localStorage.removeItem('pat');
   }
+  function setView(v) {
+    state.view = v;
+    localStorage.setItem('view', v);
+    render();
+  }
 
   // ====== DATE HELPERS ======
   function todayLocalDate() {
@@ -53,6 +66,25 @@
   function sortedDayKeys() {
     if (!state.plan) return [];
     return Object.keys(state.plan.days).sort();
+  }
+  function isoDaysBetween(a, b) {
+    const da = new Date(a + 'T00:00:00');
+    const db = new Date(b + 'T00:00:00');
+    return Math.round((db - da) / 86400000);
+  }
+  function isoAddDays(iso, n) {
+    const d = new Date(iso + 'T00:00:00');
+    d.setDate(d.getDate() + n);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  }
+  function isoMonday(iso) {
+    const d = new Date(iso + 'T00:00:00');
+    const dow = (d.getDay() + 6) % 7; // Mon=0 .. Sun=6
+    d.setDate(d.getDate() - dow);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  }
+  function dayOf(iso) {
+    return (new Date(iso + 'T00:00:00').getDay() + 6) % 7; // Mon=0..Sun=6
   }
 
   // ====== GITHUB API ======
@@ -110,14 +142,23 @@
     state.status = 'loading';
     render();
     try {
-      const [planRes, eventsRes] = await Promise.all([
+      const [planRes, eventsRes, goalsRes, tracksRes] = await Promise.all([
         ghGet(CFG.planPath),
         ghGet(CFG.eventsPath),
+        ghGet(CFG.goalsPath),
+        ghGet(CFG.tracksPath),
       ]);
       if (!planRes) throw new Error(`${CFG.planPath} not found — run \`make plan\` in the data repo.`);
       state.plan = JSON.parse(planRes.text);
       state.syncedEvents = parseEvents(eventsRes ? eventsRes.text : '');
       state.eventsSha = eventsRes ? eventsRes.sha : null;
+      state.goals = goalsRes ? (JSON.parse(goalsRes.text).goals || []) : [];
+      state.tracks = {};
+      if (tracksRes) {
+        for (const t of (JSON.parse(tracksRes.text).tracks || [])) {
+          state.tracks[t.id] = t;
+        }
+      }
       const keys = sortedDayKeys();
       if (keys.includes(state.today)) state.viewDate = state.today;
       else if (keys.length) state.viewDate = keys[0];
@@ -139,10 +180,13 @@
       .filter(Boolean);
   }
 
-  // ====== PROGRESS ======
+  function allEvents() {
+    return [...state.syncedEvents, ...state.pendingEvents];
+  }
+
+  // ====== TODAY-VIEW PROGRESS ======
   function doneFor(entry, date) {
-    const all = [...state.syncedEvents, ...state.pendingEvents];
-    const matching = all.filter((ev) =>
+    const matching = allEvents().filter((ev) =>
       (ev.local_date || (ev.ts || '').slice(0, 10)) === date &&
       ev.exercise === entry.slug
     );
@@ -162,6 +206,134 @@
     return state.pendingEvents.filter((ev) =>
       (ev.local_date || (ev.ts || '').slice(0, 10)) === date && ev.exercise === slug
     ).length;
+  }
+
+  // ====== STAGE / GOAL COMPUTE ======
+  function currentStageFor(trackId) {
+    let max = 0;
+    for (const ev of allEvents()) {
+      if (ev.kind === 'stage_pass' && ev.track === trackId && typeof ev.stage === 'number') {
+        if (ev.stage > max) max = ev.stage;
+      }
+    }
+    return max;
+  }
+
+  function lastStagePassFor(trackId) {
+    let last = null;
+    for (const ev of allEvents()) {
+      if (ev.kind === 'stage_pass' && ev.track === trackId) {
+        if (!last || (ev.ts || '') > (last.ts || '')) last = ev;
+      }
+    }
+    return last;
+  }
+
+  function trackProgress(trackId, targetStage) {
+    const cur = currentStageFor(trackId);
+    if (cur <= 0) return 0;
+    if (cur >= targetStage) return 1;
+    return cur / targetStage;
+  }
+
+  function goalProgress(goal) {
+    let totalW = 0, sum = 0;
+    for (const t of goal.tracks) {
+      sum += t.weight * trackProgress(t.id, t.target_stage);
+      totalW += t.weight;
+    }
+    return totalW > 0 ? sum / totalW : 0;
+  }
+
+  function expectedProgress(goal) {
+    const total = isoDaysBetween(goal.start_date, goal.deadline);
+    if (total <= 0) return 1;
+    const elapsed = isoDaysBetween(goal.start_date, state.today);
+    return Math.max(0, Math.min(1, elapsed / total));
+  }
+
+  function paceClass(delta) {
+    if (delta >= 0.02) return 'pace-ahead';
+    if (delta >= -0.05) return 'pace-on';
+    return 'pace-behind';
+  }
+
+  function paceLabel(delta) {
+    const pp = Math.round(delta * 100);
+    if (pp > 0) return `+${pp}pp ahead`;
+    if (pp < 0) return `${pp}pp behind`;
+    return 'on pace';
+  }
+
+  // ====== INTENSITY / TONNAGE ======
+  // Difficulty factors mirror catalog.py — keep in sync if catalog changes.
+  const DIFFICULTY = {
+    pullups: 1.0,
+    wide_pushups: 0.6,
+    pike_pushups: 1.0,
+    dips: 1.0,
+    wall_walk: 1.0,
+    ctw_handstand: 1.0,
+    pancake: 0.8,
+    pike_compression: 1.0,
+    run: 3.0,
+    bouldering: 2.0,
+  };
+  // Per-set targets so duration holds normalize to "set-equivalents."
+  const PER_SET_NORM = {
+    ctw_handstand: 15,
+    pancake: 60,
+    pike_compression: 30,
+  };
+
+  function eventIntensity(ev) {
+    if (!ev || ev.kind === 'stage_pass') return 0;
+    const f = DIFFICULTY[ev.exercise] ?? 1.0;
+    if (ev.kind === 'set') return (ev.reps || 1) * f;
+    if (ev.kind === 'hold') {
+      const norm = PER_SET_NORM[ev.exercise] || 30;
+      return ((ev.duration_s || 0) / norm) * f;
+    }
+    if (ev.kind === 'run' || ev.kind === 'session') return 1 * f;
+    if (ev.kind === 'bouldering') return 1 * f;
+    return 0;
+  }
+
+  function intensityByDay() {
+    const map = {};
+    for (const ev of allEvents()) {
+      const day = ev.local_date || (ev.ts || '').slice(0, 10);
+      if (!day) continue;
+      map[day] = (map[day] || 0) + eventIntensity(ev);
+    }
+    return map;
+  }
+
+  function trackExercises(trackId) {
+    const t = state.tracks[trackId];
+    if (!t) return new Set();
+    const set = new Set();
+    for (const s of (t.stages || [])) {
+      for (const ex of (s.exercises || [])) set.add(ex);
+    }
+    return set;
+  }
+
+  function tonnageByWeek(trackId, weeks) {
+    const exSet = trackExercises(trackId);
+    const today = state.today;
+    const monday = isoMonday(today);
+    const startMonday = isoAddDays(monday, -7 * (weeks - 1));
+    const buckets = new Array(weeks).fill(0);
+    for (const ev of allEvents()) {
+      if (!exSet.has(ev.exercise)) continue;
+      const day = ev.local_date || (ev.ts || '').slice(0, 10);
+      if (!day || day < startMonday) continue;
+      const wk = Math.floor(isoDaysBetween(startMonday, day) / 7);
+      if (wk < 0 || wk >= weeks) continue;
+      buckets[wk] += eventIntensity(ev);
+    }
+    return buckets;
   }
 
   // ====== LOG + UNDO ======
@@ -191,8 +363,21 @@
     return ev;
   }
 
+  function logStagePass(trackId, stageN, note) {
+    const ev = {
+      v: 1,
+      ts: new Date().toISOString(),
+      local_date: state.today,
+      kind: 'stage_pass',
+      track: trackId,
+      stage: stageN,
+    };
+    if (note) ev.note = note;
+    state.pendingEvents.push(ev);
+    savePending();
+  }
+
   function undoMostRecentPending(slug, date) {
-    // Remove the most recently added pending event for this slug+date.
     for (let i = state.pendingEvents.length - 1; i >= 0; i--) {
       const ev = state.pendingEvents[i];
       const d = ev.local_date || (ev.ts || '').slice(0, 10);
@@ -244,12 +429,19 @@
     render();
   }
 
-  // ====== RENDER ======
+  // ====== RENDER (root) ======
   function render() {
     const app = document.getElementById('app');
     const bar = document.getElementById('sync-bar');
+    const tabs = document.getElementById('tabs');
 
     app.innerHTML = '';
+    tabs.hidden = (state.status !== 'ready');
+    if (!tabs.hidden) {
+      for (const b of tabs.querySelectorAll('.tab')) {
+        b.classList.toggle('active', b.dataset.view === state.view);
+      }
+    }
 
     if (state.status === 'no-token') {
       const d = document.createElement('div');
@@ -285,21 +477,25 @@
       return;
     }
 
-    // ===== ready =====
-    app.appendChild(renderHeader());
+    if (state.view === 'project') renderProject(app);
+    else renderToday(app);
 
+    bar.hidden = false;
+    updateSyncBtn();
+  }
+
+  // ====== TODAY VIEW ======
+  function renderToday(app) {
+    app.appendChild(renderHeader());
     const entries = (state.plan.days[state.viewDate] || []);
     if (entries.length === 0) {
       const em = document.createElement('div');
       em.className = 'empty';
       em.innerHTML = `<p>Nothing planned for ${state.viewDate}.</p><p style="margin-top:0.5rem;color:var(--dim)">Rest day, or rerun <code>make plan</code>.</p>`;
       app.appendChild(em);
-    } else {
-      for (const entry of entries) app.appendChild(renderEntry(entry));
+      return;
     }
-
-    bar.hidden = false;
-    updateSyncBtn();
+    for (const entry of entries) app.appendChild(renderEntry(entry));
   }
 
   function renderHeader() {
@@ -419,7 +615,6 @@
     btn.addEventListener('click', () => {
       if (!canLog) return;
 
-      // Session toggle: simple — tap to log if not done, tap to undo if done via pending.
       if (entry.unit === 'session') {
         if (isDone && pending > 0) {
           undoMostRecentPending(entry.slug, state.viewDate);
@@ -431,11 +626,6 @@
         return;
       }
 
-      // Reps / walks / holds:
-      //   - single tap: +1 pending
-      //   - double-tap (second tap within DOUBLE_TAP_MS): net -1 from pre-pair state.
-      //     Removes the event just logged by the first tap AND one more pending event
-      //     for this slug+date (if any exist). Synced events are never touched.
       const now = Date.now();
       const lt = state.lastTap[entry.slug];
       if (lt && now - lt.at < DOUBLE_TAP_MS && lt.eventRef) {
@@ -456,6 +646,347 @@
     return wrap;
   }
 
+  // ====== PROJECT VIEW ======
+  function renderProject(app) {
+    const header = document.createElement('header');
+    const eyebrow = document.createElement('div');
+    eyebrow.className = 'eyebrow';
+    const dot = document.createElement('span');
+    dot.className = 'dot';
+    eyebrow.appendChild(dot);
+    const lab = document.createElement('span');
+    lab.textContent = 'Project status';
+    eyebrow.appendChild(lab);
+    header.appendChild(eyebrow);
+
+    const h1 = document.createElement('h1');
+    h1.className = 'project-title';
+    h1.textContent = `${state.goals.filter((g) => (g.status || 'active') === 'active').length} active goals`;
+    header.appendChild(h1);
+    app.appendChild(header);
+
+    if (state.goals.length === 0) {
+      const em = document.createElement('div');
+      em.className = 'empty';
+      em.innerHTML = `<p>No goals defined.</p><p style="margin-top:0.5rem;color:var(--dim)">Add <code>training/goals.json</code> in the data repo.</p>`;
+      app.appendChild(em);
+      return;
+    }
+
+    const active = state.goals.filter((g) => (g.status || 'active') === 'active');
+    const done = state.goals.filter((g) => g.status === 'met');
+    for (const g of active) app.appendChild(renderGoalCard(g));
+    if (done.length) {
+      const h = document.createElement('div');
+      h.className = 'section-h';
+      h.textContent = 'Completed';
+      app.appendChild(h);
+      for (const g of done) app.appendChild(renderGoalCard(g));
+    }
+
+    app.appendChild(renderHeatmap());
+  }
+
+  function renderGoalCard(goal) {
+    const expanded = state.expandedGoalId === goal.id;
+    const card = document.createElement('div');
+    card.className = 'goal' + (expanded ? ' open' : '');
+
+    const head = document.createElement('div');
+    head.className = 'goal-head';
+    head.addEventListener('click', () => {
+      state.expandedGoalId = expanded ? null : goal.id;
+      render();
+    });
+
+    const titleRow = document.createElement('div');
+    titleRow.className = 'goal-title-row';
+    const title = document.createElement('div');
+    title.className = 'goal-title';
+    title.textContent = goal.display;
+    titleRow.appendChild(title);
+
+    const days = isoDaysBetween(state.today, goal.deadline);
+    const meta = document.createElement('div');
+    meta.className = 'goal-meta';
+    if (goal.status === 'met') meta.textContent = 'met';
+    else if (days < 0) meta.textContent = `${-days}d overdue`;
+    else meta.textContent = `${days}d left`;
+    titleRow.appendChild(meta);
+    head.appendChild(titleRow);
+
+    const prog = goalProgress(goal);
+    const exp = expectedProgress(goal);
+    const delta = prog - exp;
+
+    const bar = document.createElement('div');
+    bar.className = 'goal-bar';
+    bar.style.setProperty('--pct', `${(prog * 100).toFixed(1)}%`);
+    bar.style.setProperty('--exp', `${(exp * 100).toFixed(1)}%`);
+    if (goal.status !== 'met') {
+      const marker = document.createElement('div');
+      marker.className = 'marker';
+      bar.appendChild(marker);
+    }
+    head.appendChild(bar);
+
+    const stats = document.createElement('div');
+    stats.className = 'goal-stats';
+    const pctLabel = document.createElement('span');
+    pctLabel.className = 'goal-pct';
+    pctLabel.textContent = `${Math.round(prog * 100)}%`;
+    stats.appendChild(pctLabel);
+
+    if (goal.status !== 'met') {
+      const pace = document.createElement('span');
+      pace.className = `goal-pace ${paceClass(delta)}`;
+      pace.textContent = paceLabel(delta);
+      stats.appendChild(pace);
+    }
+
+    const caret = document.createElement('span');
+    caret.className = 'goal-caret';
+    caret.textContent = expanded ? '▾' : '▸';
+    stats.appendChild(caret);
+
+    head.appendChild(stats);
+    card.appendChild(head);
+
+    if (expanded) {
+      const body = document.createElement('div');
+      body.className = 'goal-body';
+      for (const t of goal.tracks) body.appendChild(renderTrackBlock(goal, t));
+      body.appendChild(renderTonnageChart(goal));
+      card.appendChild(body);
+    }
+
+    return card;
+  }
+
+  function renderTrackBlock(goal, goalTrack) {
+    const t = state.tracks[goalTrack.id];
+    const wrap = document.createElement('div');
+    wrap.className = 'track';
+
+    if (!t) {
+      const warn = document.createElement('div');
+      warn.className = 'track-warn';
+      warn.textContent = `Unknown track: ${goalTrack.id}`;
+      wrap.appendChild(warn);
+      return wrap;
+    }
+
+    const head = document.createElement('div');
+    head.className = 'track-head';
+    const name = document.createElement('span');
+    name.className = 'track-name';
+    name.textContent = t.display;
+    head.appendChild(name);
+
+    const cur = currentStageFor(t.id);
+    const stageLabel = document.createElement('span');
+    stageLabel.className = 'track-stage';
+    stageLabel.textContent = `stage ${cur} of ${goalTrack.target_stage}`;
+    head.appendChild(stageLabel);
+
+    const weight = document.createElement('span');
+    weight.className = 'track-weight';
+    weight.textContent = `${Math.round((goalTrack.weight || 1) * 100)}%`;
+    head.appendChild(weight);
+    wrap.appendChild(head);
+
+    wrap.appendChild(renderLadder(t, cur, goalTrack.target_stage));
+
+    const last = lastStagePassFor(t.id);
+    if (last) {
+      const meta = document.createElement('div');
+      meta.className = 'track-last';
+      const date = last.local_date || (last.ts || '').slice(0, 10);
+      meta.textContent = `Last pass: stage ${last.stage} · ${date}${last.note ? ' · ' + last.note : ''}`;
+      wrap.appendChild(meta);
+    }
+
+    if (cur < goalTrack.target_stage) {
+      const next = cur + 1;
+      const nextStage = (t.stages || []).find((s) => s.n === next);
+      if (nextStage) {
+        const btn = document.createElement('button');
+        btn.className = 'pass-btn';
+        btn.textContent = `Pass stage ${next}: ${nextStage.test}`;
+        btn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const note = window.prompt(
+            `Confirm: passed stage ${next} of ${t.display}?\n\n${nextStage.test}\n\nOptional note (Cancel to abort):`,
+            ''
+          );
+          if (note === null) return;
+          logStagePass(t.id, next, note.trim() || null);
+          toast(`${t.display}: stage ${next} passed`, 'accent');
+          render();
+        });
+        wrap.appendChild(btn);
+      }
+    }
+
+    return wrap;
+  }
+
+  function renderLadder(track, cur, target) {
+    const stages = track.stages || [];
+    const w = 240, gap = 6;
+    const step = (w - gap * (stages.length - 1)) / stages.length;
+    const r = Math.min(8, step * 0.42);
+
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.classList.add('ladder');
+    svg.setAttribute('viewBox', `0 0 ${w} ${r * 2 + 14}`);
+    svg.setAttribute('preserveAspectRatio', 'xMidYMid meet');
+
+    // connecting line
+    const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+    line.setAttribute('x1', step / 2);
+    line.setAttribute('x2', w - step / 2);
+    line.setAttribute('y1', r + 4);
+    line.setAttribute('y2', r + 4);
+    line.setAttribute('class', 'ladder-line');
+    svg.appendChild(line);
+
+    for (let i = 0; i < stages.length; i++) {
+      const s = stages[i];
+      const cx = step / 2 + i * (step + gap);
+      const cy = r + 4;
+      const c = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+      c.setAttribute('cx', cx); c.setAttribute('cy', cy); c.setAttribute('r', r);
+      let cls = 'ladder-dot';
+      if (s.n <= cur) cls += ' done';
+      else if (s.n === cur + 1) cls += ' next';
+      if (s.n === target) cls += ' target';
+      c.setAttribute('class', cls);
+      const ttl = document.createElementNS('http://www.w3.org/2000/svg', 'title');
+      ttl.textContent = `Stage ${s.n}: ${s.test}`;
+      c.appendChild(ttl);
+      svg.appendChild(c);
+
+      const lbl = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+      lbl.setAttribute('x', cx);
+      lbl.setAttribute('y', cy + r + 9);
+      lbl.setAttribute('text-anchor', 'middle');
+      lbl.setAttribute('class', 'ladder-num');
+      lbl.textContent = s.n;
+      svg.appendChild(lbl);
+    }
+    return svg;
+  }
+
+  function renderTonnageChart(goal) {
+    const wrap = document.createElement('div');
+    wrap.className = 'tonnage';
+
+    const h = document.createElement('div');
+    h.className = 'tonnage-h';
+    h.textContent = `Last ${TONNAGE_WEEKS} weeks · volume per track`;
+    wrap.appendChild(h);
+
+    const max = Math.max(
+      1,
+      ...goal.tracks.flatMap((gt) => tonnageByWeek(gt.id, TONNAGE_WEEKS))
+    );
+
+    for (const gt of goal.tracks) {
+      const t = state.tracks[gt.id];
+      if (!t) continue;
+      const buckets = tonnageByWeek(gt.id, TONNAGE_WEEKS);
+      const row = document.createElement('div');
+      row.className = 'tonnage-row';
+      const lbl = document.createElement('span');
+      lbl.className = 'tonnage-lbl';
+      lbl.textContent = t.display;
+      row.appendChild(lbl);
+
+      const bars = document.createElement('div');
+      bars.className = 'tonnage-bars';
+      for (const v of buckets) {
+        const b = document.createElement('span');
+        b.className = 'tonnage-bar';
+        const pct = (v / max) * 100;
+        b.style.setProperty('--h', `${pct}%`);
+        b.title = `${Math.round(v)}`;
+        bars.appendChild(b);
+      }
+      row.appendChild(bars);
+      wrap.appendChild(row);
+    }
+    return wrap;
+  }
+
+  function renderHeatmap() {
+    const wrap = document.createElement('div');
+    wrap.className = 'heatmap';
+
+    const h = document.createElement('div');
+    h.className = 'heatmap-h';
+    h.textContent = `Last ${HEATMAP_WEEKS} weeks · daily intensity`;
+    wrap.appendChild(h);
+
+    const monday = isoMonday(state.today);
+    const start = isoAddDays(monday, -7 * (HEATMAP_WEEKS - 1));
+    const intensity = intensityByDay();
+
+    let max = 0;
+    for (let i = 0; i < HEATMAP_WEEKS * 7; i++) {
+      const d = isoAddDays(start, i);
+      if (d > state.today) continue;
+      max = Math.max(max, intensity[d] || 0);
+    }
+    if (max === 0) max = 1;
+
+    const cell = 11, cgap = 2;
+    const W = HEATMAP_WEEKS * (cell + cgap);
+    const H = 7 * (cell + cgap) + 14;
+
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.classList.add('heatmap-svg');
+    svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+    svg.setAttribute('preserveAspectRatio', 'xMidYMid meet');
+
+    let lastMonth = -1;
+    for (let w = 0; w < HEATMAP_WEEKS; w++) {
+      const colDate = isoAddDays(start, w * 7);
+      const m = new Date(colDate + 'T00:00:00').getMonth();
+      if (m !== lastMonth) {
+        const tx = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+        tx.setAttribute('x', w * (cell + cgap));
+        tx.setAttribute('y', 8);
+        tx.setAttribute('class', 'heatmap-month');
+        tx.textContent = ['J','F','M','A','M','J','J','A','S','O','N','D'][m];
+        svg.appendChild(tx);
+        lastMonth = m;
+      }
+      for (let d = 0; d < 7; d++) {
+        const date = isoAddDays(start, w * 7 + d);
+        const x = w * (cell + cgap);
+        const y = 12 + d * (cell + cgap);
+        const v = intensity[date] || 0;
+        const lvl = v <= 0 ? 0 : Math.min(4, 1 + Math.floor((v / max) * 4 - 0.001));
+        const future = date > state.today;
+        const r = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+        r.setAttribute('x', x);
+        r.setAttribute('y', y);
+        r.setAttribute('width', cell);
+        r.setAttribute('height', cell);
+        r.setAttribute('rx', 2);
+        r.setAttribute('class', `hm-cell hm-l${lvl}${future ? ' hm-future' : ''}`);
+        const ttl = document.createElementNS('http://www.w3.org/2000/svg', 'title');
+        ttl.textContent = `${date}: ${v.toFixed(1)}`;
+        r.appendChild(ttl);
+        svg.appendChild(r);
+      }
+    }
+    wrap.appendChild(svg);
+    return wrap;
+  }
+
+  // ====== SYNC BAR ======
   function updateSyncBtn() {
     const btn = document.getElementById('sync-btn');
     const n = state.pendingEvents.length;
@@ -521,6 +1052,9 @@
       toast('Pending discarded.');
       render();
     });
+    for (const b of document.querySelectorAll('#tabs .tab')) {
+      b.addEventListener('click', () => setView(b.dataset.view));
+    }
     boot();
   }
 
