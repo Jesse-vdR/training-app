@@ -853,6 +853,100 @@ button.tap:disabled:active { transform: none; }
   letter-spacing: 0.02em;
 }
 
+.goal-card.editing { border-color: rgba(124, 58, 237, 0.45); }
+
+.status-active { color: var(--ok); }
+.status-met { color: var(--warn); }
+.status-archived { color: var(--dim); }
+
+.list-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin: 0 0 0.85rem;
+}
+
+.add-btn {
+  margin-top: 0;
+  padding: 0.5rem 1rem;
+  font-size: 0.85rem;
+}
+
+.card-actions {
+  display: flex;
+  gap: 0.4rem;
+  justify-content: flex-end;
+  margin-top: 0.55rem;
+  border-top: 1px dashed var(--line);
+  padding-top: 0.5rem;
+}
+
+.card-actions .btn-link {
+  font-size: 0.78rem;
+  padding: 0.3rem 0.6rem;
+}
+
+.btn-danger { color: #fca5a5; }
+.btn-danger:active { color: var(--danger); }
+
+/* Forms inside cards */
+
+.form-title {
+  margin: 0 0 0.75rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--accent-2);
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+}
+
+.form-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  margin-bottom: 0.55rem;
+}
+
+.form-field:last-child { margin-bottom: 0; }
+
+.form-label {
+  font-size: 0.7rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--dim);
+  font-weight: 600;
+}
+
+.form-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.6rem;
+}
+
+.form-field input[type="text"],
+.form-field input[type="date"],
+.form-field select {
+  background: var(--bg-3);
+  border: 1px solid var(--line);
+  color: var(--fg);
+  border-radius: 8px;
+  padding: 0.5rem 0.7rem;
+  font-family: inherit;
+  font-size: 0.88rem;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.form-field input:focus,
+.form-field select:focus {
+  outline: none;
+  border-color: var(--accent-2);
+}
+
+.json-editor {
+  font-size: 0.78rem;
+  min-height: 7rem;
+}
+
 /* Track cards */
 
 .track-card {

@@ -95,6 +95,23 @@ const patchPlan = (apiBase, planId, payload) =>
     body: JSON.stringify(payload),
   });
 
+const postGoal = (apiBase, payload) =>
+  api(apiBase, "/v1/training/goals", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+
+const patchGoal = (apiBase, id, payload) =>
+  api(apiBase, `/v1/training/goals/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+
+const deleteGoal = (apiBase, id) =>
+  api(apiBase, `/v1/training/goals/${id}`, { method: "DELETE" });
+
 // ----- Helpers -----
 
 function isoFromDate(d) {
@@ -758,46 +775,212 @@ function planEntrySpec(entry) {
   return entry.unit;
 }
 
-function settingsGoals(state) {
-  if (!state.goals.length) {
-    return settingsEmpty("No goals defined.",
-      "Add or edit-form support lands in a follow-up.");
-  }
+function settingsGoals(state, render) {
   const active = state.goals.filter((g) => g.status === "active");
-  const other = state.goals.filter((g) => g.status !== "active");
+  const adding = state.editingGoalId === 0;
+
   return el("section", { class: "settings-body" },
     settingsHeader(
       `${active.length} active · ${state.goals.length} total`,
       "Goals",
     ),
-    ...state.goals.map((goal) =>
-      el("article", { class: "goal-card" },
-        el("header", { class: "goal-card-head" },
-          el("span", { class: "goal-card-name" }, goal.display),
-          el("span", { class: "goal-card-status" }, goal.status),
-        ),
-        el("div", { class: "goal-card-meta muted" },
-          [
-            goal.start_date ? `start ${goal.start_date}` : null,
-            goal.deadline ? `deadline ${goal.deadline}` : null,
-            `slug: ${goal.slug}`,
-          ].filter(Boolean).join(" · "),
-        ),
-        goal.tracks && goal.tracks.length
-          ? el("ul", { class: "goal-card-tracks" },
-              ...goal.tracks.map((t) =>
-                el("li", {},
-                  `${t.id || t.slug || "?"} → stage ${t.target_stage}`,
-                  t.weight != null
-                    ? el("span", { class: "muted" },
-                        ` · weight ${t.weight}`)
-                    : null,
-                ),
-              ),
-            )
-          : el("p", { class: "muted" }, "no track weights"),
-      ),
+    el("div", { class: "list-actions" },
+      adding
+        ? null
+        : el("button", {
+            class: "btn-primary add-btn",
+            onclick: () => { state.editingGoalId = 0; render(); },
+          }, "+ Add goal"),
     ),
+    adding ? renderGoalForm(state, render, null) : null,
+    ...state.goals.map((goal) =>
+      state.editingGoalId === goal.id
+        ? renderGoalForm(state, render, goal)
+        : renderGoalCard(state, render, goal),
+    ),
+    !state.goals.length && !adding
+      ? el("p", { class: "muted" }, "No goals yet. Tap + Add goal to start.")
+      : null,
+  );
+}
+
+function renderGoalCard(state, render, goal) {
+  const isActive = goal.status === "active";
+  const onToggleStatus = async () => {
+    const newStatus = isActive ? "met" : "active";
+    try {
+      const updated = await patchGoal(state.apiBase, goal.id, { status: newStatus });
+      Object.assign(goal, updated);
+      render();
+      toast(`${goal.display} → ${newStatus}`, "success");
+    } catch (err) {
+      toast(`Update failed: ${err.message}`);
+    }
+  };
+
+  return el("article", { class: "goal-card" },
+    el("header", { class: "goal-card-head" },
+      el("span", { class: "goal-card-name" }, goal.display),
+      el("span", { class: `goal-card-status status-${goal.status}` }, goal.status),
+    ),
+    el("div", { class: "goal-card-meta muted" },
+      [
+        goal.start_date ? `start ${goal.start_date}` : null,
+        goal.deadline ? `deadline ${goal.deadline}` : null,
+        `slug: ${goal.slug}`,
+      ].filter(Boolean).join(" · "),
+    ),
+    Array.isArray(goal.tracks) && goal.tracks.length
+      ? el("ul", { class: "goal-card-tracks" },
+          ...goal.tracks.map((t) =>
+            el("li", {},
+              `${t.id || t.slug || "?"} → stage ${t.target_stage}`,
+              t.weight != null
+                ? el("span", { class: "muted" }, ` · weight ${t.weight}`)
+                : null,
+            ),
+          ),
+        )
+      : el("p", { class: "muted" }, "no track weights"),
+    el("div", { class: "card-actions" },
+      el("button", {
+        class: "btn-link",
+        onclick: () => { state.editingGoalId = goal.id; render(); },
+      }, "Edit"),
+      el("button", {
+        class: "btn-link",
+        onclick: onToggleStatus,
+      }, isActive ? "Mark met" : "Reactivate"),
+    ),
+  );
+}
+
+function renderGoalForm(state, render, goal) {
+  const isNew = goal === null;
+  const ids = {
+    display: `goal-display-${goal ? goal.id : "new"}`,
+    slug: `goal-slug-${goal ? goal.id : "new"}`,
+    status: `goal-status-${goal ? goal.id : "new"}`,
+    start: `goal-start-${goal ? goal.id : "new"}`,
+    deadline: `goal-deadline-${goal ? goal.id : "new"}`,
+    tracks: `goal-tracks-${goal ? goal.id : "new"}`,
+    err: `goal-err-${goal ? goal.id : "new"}`,
+  };
+  const defaults = goal || {
+    display: "",
+    slug: "",
+    status: "active",
+    start_date: "",
+    deadline: "",
+    tracks: [],
+  };
+
+  const showErr = (msg) => {
+    const errBox = document.getElementById(ids.err);
+    if (!errBox) return;
+    errBox.textContent = msg || "";
+    errBox.style.display = msg ? "block" : "none";
+  };
+
+  const onSave = async (ev) => {
+    const btn = ev.currentTarget;
+    const get = (id) => document.getElementById(id);
+    showErr("");
+    const payload = {
+      display: get(ids.display).value.trim(),
+      slug: get(ids.slug).value.trim(),
+      status: get(ids.status).value,
+      start_date: get(ids.start).value || null,
+      deadline: get(ids.deadline).value || null,
+    };
+    if (!payload.display) { showErr("Display is required."); return; }
+    if (!payload.slug) { showErr("Slug is required."); return; }
+    let tracks;
+    try {
+      tracks = JSON.parse(get(ids.tracks).value);
+    } catch (e) {
+      showErr(`Invalid tracks JSON: ${e.message}`);
+      return;
+    }
+    if (!Array.isArray(tracks)) { showErr("Tracks must be a JSON array."); return; }
+    payload.tracks = tracks;
+
+    btn.disabled = true;
+    btn.textContent = "Saving…";
+    try {
+      let updated;
+      if (isNew) {
+        updated = await postGoal(state.apiBase, payload);
+        state.goals.push(updated);
+      } else {
+        updated = await patchGoal(state.apiBase, goal.id, payload);
+        const idx = state.goals.findIndex((g) => g.id === goal.id);
+        if (idx >= 0) state.goals[idx] = updated;
+      }
+      state.editingGoalId = null;
+      render();
+      toast(`${updated.display} ${isNew ? "created" : "saved"}`, "success");
+    } catch (err) {
+      btn.disabled = false;
+      btn.textContent = isNew ? "Create" : "Save";
+      showErr(err.message);
+    }
+  };
+
+  const onDelete = async () => {
+    if (!confirm(`Delete goal "${goal.display}"? This can't be undone.`)) return;
+    try {
+      await deleteGoal(state.apiBase, goal.id);
+      state.goals = state.goals.filter((g) => g.id !== goal.id);
+      state.editingGoalId = null;
+      render();
+      toast(`Deleted ${goal.display}`, "success");
+    } catch (err) {
+      toast(`Delete failed: ${err.message}`);
+    }
+  };
+
+  return el("article", { class: "goal-card editing" },
+    el("h3", { class: "form-title" }, isNew ? "New goal" : `Editing: ${goal.display}`),
+    formField("Display", el("input", { id: ids.display, type: "text", value: defaults.display })),
+    formField("Slug", el("input", { id: ids.slug, type: "text", value: defaults.slug })),
+    formField("Status", el("select", { id: ids.status },
+      el("option", { value: "active", ...(defaults.status === "active" ? { selected: "" } : {}) }, "active"),
+      el("option", { value: "met", ...(defaults.status === "met" ? { selected: "" } : {}) }, "met"),
+      el("option", { value: "archived", ...(defaults.status === "archived" ? { selected: "" } : {}) }, "archived"),
+    )),
+    el("div", { class: "form-row" },
+      formField("Start", el("input", { id: ids.start, type: "date", value: defaults.start_date || "" })),
+      formField("Deadline", el("input", { id: ids.deadline, type: "date", value: defaults.deadline || "" })),
+    ),
+    formField("Tracks (JSON array)",
+      el("textarea", {
+        id: ids.tracks,
+        class: "md-editor json-editor",
+        rows: "6",
+        spellcheck: "false",
+      }, JSON.stringify(defaults.tracks || [], null, 2)),
+    ),
+    el("p", { id: ids.err, class: "generate-error", style: { display: "none" } }),
+    el("div", { class: "editor-actions" },
+      el("button", { class: "btn-primary", onclick: onSave },
+        isNew ? "Create" : "Save"),
+      el("button", {
+        class: "btn-link",
+        onclick: () => { state.editingGoalId = null; render(); },
+      }, "Cancel"),
+      isNew ? null : el("button", {
+        class: "btn-link btn-danger",
+        onclick: onDelete,
+      }, "Delete"),
+    ),
+  );
+}
+
+function formField(label, control) {
+  return el("label", { class: "form-field" },
+    el("span", { class: "form-label" }, label),
+    control,
   );
 }
 
@@ -1192,6 +1375,7 @@ async function bootstrap() {
     settingsSection: storedSettingsSection(),
     agentJob: null,
     agentJobError: null,
+    editingGoalId: null,
   };
   renderHome(root, state);
 }
