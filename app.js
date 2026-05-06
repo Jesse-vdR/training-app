@@ -88,6 +88,13 @@ const putLongTerm = (apiBase, body) =>
     body: JSON.stringify({ body }),
   });
 
+const patchPlan = (apiBase, planId, payload) =>
+  api(apiBase, `/v1/training/plans/${planId}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+
 // ----- Helpers -----
 
 function isoFromDate(d) {
@@ -553,12 +560,74 @@ function settingsPlan(state, render) {
       : settingsHeader("No plan yet", "Plan"),
     renderGeneratePlanCard(state, render, target, upToDate),
     state.plan ? renderPlanSummary(state.plan) : null,
-    state.plan
-      ? el("details", { class: "settings-raw" },
-          el("summary", {}, "Raw JSON"),
-          jsonBlock(state.plan.body),
-        )
-      : null,
+    state.plan ? renderPlanJsonEditor(state, render) : null,
+  );
+}
+
+function renderPlanJsonEditor(state, render) {
+  const plan = state.plan;
+  const initial = JSON.stringify(plan.body, null, 2);
+  const taId = "plan-json-editor";
+  const errId = "plan-json-error";
+
+  const showErr = (msg) => {
+    const errBox = document.getElementById(errId);
+    if (!errBox) return;
+    errBox.textContent = msg || "";
+    errBox.style.display = msg ? "block" : "none";
+  };
+
+  const onSave = async (ev) => {
+    const btn = ev.currentTarget;
+    const ta = document.getElementById(taId);
+    showErr("");
+    let parsed;
+    try {
+      parsed = JSON.parse(ta.value);
+    } catch (parseErr) {
+      showErr(`Invalid JSON: ${parseErr.message}`);
+      return;
+    }
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      showErr("Body must be a JSON object.");
+      return;
+    }
+    btn.disabled = true;
+    btn.textContent = "Saving…";
+    try {
+      const updated = await patchPlan(state.apiBase, plan.id, { body: parsed });
+      state.plan = updated;
+      render();
+      toast("Plan saved", "success");
+    } catch (err) {
+      btn.disabled = false;
+      btn.textContent = "Save";
+      showErr(err.message);
+    }
+  };
+
+  return el("details", { class: "settings-raw" },
+    el("summary", {}, "Edit JSON"),
+    el("p", { class: "muted" },
+      "Tweak the plan body directly. Save replaces the JSON for this plan row."),
+    el("textarea", {
+      id: taId,
+      class: "md-editor",
+      rows: "20",
+      spellcheck: "false",
+    }, initial),
+    el("p", { id: errId, class: "generate-error", style: { display: "none" } }),
+    el("div", { class: "editor-actions" },
+      el("button", { class: "btn-primary", onclick: onSave }, "Save"),
+      el("button", {
+        class: "btn-link",
+        onclick: () => {
+          const ta = document.getElementById(taId);
+          if (ta) ta.value = initial;
+          showErr("");
+        },
+      }, "Reset"),
+    ),
   );
 }
 
