@@ -1,52 +1,18 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta name="theme-color" content="#111">
-  <meta name="mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <title>Training Logger</title>
-  <link rel="manifest" href="manifest.json">
-  <link rel="icon" type="image/png" href="icon-192.png">
-  <link rel="apple-touch-icon" href="icon-192.png">
-  <link rel="stylesheet" href="style.css">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#0f1119">
+<title>training</title>
+<link rel="stylesheet" href="/style.css">
 </head>
 <body>
-  <nav id="tabs" hidden>
-    <button class="tab" data-view="today">Today</button>
-    <button class="tab" data-view="project">Project</button>
-  </nav>
-  <main id="app"><div class="loading">Loading…</div></main>
-  <div id="sync-bar" hidden>
-    <button id="sync-btn">Sync</button>
-    <button id="settings-btn" title="Settings">⚙</button>
-  </div>
-  <div id="settings" hidden>
-    <h2>Settings</h2>
-
-    <label for="pat-input">GitHub personal access token</label>
-    <input type="password" id="pat-input" autocomplete="off" spellcheck="false" placeholder="github_pat_…">
-    <div class="row">
-      <button id="pat-save" class="primary">Save</button>
-      <button id="pat-clear" class="danger">Clear token</button>
-      <button id="settings-close">Close</button>
-    </div>
-
-    <p class="help">
-      Create a <strong>fine-grained</strong> personal access token at
-      <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noreferrer">github.com/settings/personal-access-tokens</a>,
-      scoped to <code>Jesse-vdR/Jesse</code> only, with <code>Contents: Read and write</code>.
-      The token is stored only in this browser's localStorage for this origin; it is never sent anywhere except api.github.com.
-    </p>
-
-    <h3>Pending events</h3>
-    <pre id="pending-view">—</pre>
-    <div class="row">
-      <button id="pending-clear" class="danger">Discard pending (no sync)</button>
-    </div>
-  </div>
-  <script src="app.js"></script>
+<main class="placeholder">
+  <h1>training</h1>
+  <p>Foundation deployed. Auth + today view are next.</p>
+  <p class="meta"><span id="api-base">…</span> · <span id="sha">…</span></p>
+</main>
+<script type="module" src="/app.js"></script>
 </body>
 </html>

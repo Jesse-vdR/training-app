@@ -2,3 +2,9 @@
 *.log
 .vscode/
 .idea/
+version.txt
+
+# `data/` is in the global gitignore — re-include the small config files
+# this repo ships.
+!data/
+!data/*
