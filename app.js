@@ -112,6 +112,23 @@ const patchGoal = (apiBase, id, payload) =>
 const deleteGoal = (apiBase, id) =>
   api(apiBase, `/v1/training/goals/${id}`, { method: "DELETE" });
 
+const postTrack = (apiBase, payload) =>
+  api(apiBase, "/v1/training/tracks", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+
+const patchTrack = (apiBase, id, payload) =>
+  api(apiBase, `/v1/training/tracks/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+
+const deleteTrack = (apiBase, id) =>
+  api(apiBase, `/v1/training/tracks/${id}`, { method: "DELETE" });
+
 // ----- Helpers -----
 
 function isoFromDate(d) {
@@ -984,36 +1001,157 @@ function formField(label, control) {
   );
 }
 
-function settingsTracks(state) {
-  if (!state.tracks.length) {
-    return settingsEmpty("No tracks defined.",
-      "Tracks were imported from tracks.json by the one-shot script.");
-  }
+function settingsTracks(state, render) {
+  const adding = state.editingTrackId === 0;
   return el("section", { class: "settings-body" },
     settingsHeader(`${state.tracks.length} tracks`, "Tracks"),
+    el("div", { class: "list-actions" },
+      adding
+        ? null
+        : el("button", {
+            class: "btn-primary add-btn",
+            onclick: () => { state.editingTrackId = 0; render(); },
+          }, "+ Add track"),
+    ),
+    adding ? renderTrackForm(state, render, null) : null,
     ...state.tracks.map((track) =>
-      el("article", { class: "track-card" },
-        el("header", { class: "track-card-head" },
-          el("span", { class: "track-card-name" }, track.display),
-          el("span", { class: "track-card-slug muted" }, track.slug),
-        ),
-        el("p", { class: "muted track-card-meta" },
-          `${(track.stages || []).length} stages`),
-        el("details", { class: "track-stages" },
-          el("summary", {}, "Stages"),
-          el("ol", { class: "track-stage-list" },
-            ...(track.stages || []).map((s) =>
-              el("li", {},
-                el("span", { class: "stage-test" }, s.test),
-                Array.isArray(s.exercises) && s.exercises.length
-                  ? el("span", { class: "muted stage-ex" },
-                      ` · ${s.exercises.join(", ")}`)
-                  : null,
-              ),
-            ),
+      state.editingTrackId === track.id
+        ? renderTrackForm(state, render, track)
+        : renderTrackCard(state, render, track),
+    ),
+    !state.tracks.length && !adding
+      ? el("p", { class: "muted" }, "No tracks yet. Tap + Add track to start.")
+      : null,
+  );
+}
+
+function renderTrackCard(state, render, track) {
+  return el("article", { class: "track-card" },
+    el("header", { class: "track-card-head" },
+      el("span", { class: "track-card-name" }, track.display),
+      el("span", { class: "track-card-slug muted" }, track.slug),
+    ),
+    el("p", { class: "muted track-card-meta" },
+      `${(track.stages || []).length} stages`),
+    el("details", { class: "track-stages" },
+      el("summary", {}, "Stages"),
+      el("ol", { class: "track-stage-list" },
+        ...(track.stages || []).map((s) =>
+          el("li", {},
+            el("span", { class: "stage-test" }, s.test),
+            Array.isArray(s.exercises) && s.exercises.length
+              ? el("span", { class: "muted stage-ex" },
+                  ` · ${s.exercises.join(", ")}`)
+              : null,
           ),
         ),
       ),
+    ),
+    el("div", { class: "card-actions" },
+      el("button", {
+        class: "btn-link",
+        onclick: () => { state.editingTrackId = track.id; render(); },
+      }, "Edit"),
+    ),
+  );
+}
+
+function renderTrackForm(state, render, track) {
+  const isNew = track === null;
+  const ids = {
+    slug: `track-slug-${track ? track.id : "new"}`,
+    display: `track-display-${track ? track.id : "new"}`,
+    stages: `track-stages-${track ? track.id : "new"}`,
+    err: `track-err-${track ? track.id : "new"}`,
+  };
+  const defaults = track || { slug: "", display: "", stages: [] };
+
+  const showErr = (msg) => {
+    const errBox = document.getElementById(ids.err);
+    if (!errBox) return;
+    errBox.textContent = msg || "";
+    errBox.style.display = msg ? "block" : "none";
+  };
+
+  const onSave = async (ev) => {
+    const btn = ev.currentTarget;
+    const get = (id) => document.getElementById(id);
+    showErr("");
+    const payload = {
+      slug: get(ids.slug).value.trim(),
+      display: get(ids.display).value.trim(),
+    };
+    if (!payload.slug) { showErr("Slug is required."); return; }
+    if (!payload.display) { showErr("Display is required."); return; }
+    let stages;
+    try {
+      stages = JSON.parse(get(ids.stages).value);
+    } catch (e) {
+      showErr(`Invalid stages JSON: ${e.message}`);
+      return;
+    }
+    if (!Array.isArray(stages)) { showErr("Stages must be a JSON array."); return; }
+    payload.stages = stages;
+
+    btn.disabled = true;
+    btn.textContent = "Saving…";
+    try {
+      let updated;
+      if (isNew) {
+        updated = await postTrack(state.apiBase, payload);
+        state.tracks.push(updated);
+      } else {
+        updated = await patchTrack(state.apiBase, track.id, payload);
+        const idx = state.tracks.findIndex((t) => t.id === track.id);
+        if (idx >= 0) state.tracks[idx] = updated;
+      }
+      state.editingTrackId = null;
+      render();
+      toast(`${updated.display} ${isNew ? "created" : "saved"}`, "success");
+    } catch (err) {
+      btn.disabled = false;
+      btn.textContent = isNew ? "Create" : "Save";
+      showErr(err.message);
+    }
+  };
+
+  const onDelete = async () => {
+    if (!confirm(`Delete track "${track.display}"? This can't be undone.`)) return;
+    try {
+      await deleteTrack(state.apiBase, track.id);
+      state.tracks = state.tracks.filter((t) => t.id !== track.id);
+      state.editingTrackId = null;
+      render();
+      toast(`Deleted ${track.display}`, "success");
+    } catch (err) {
+      toast(`Delete failed: ${err.message}`);
+    }
+  };
+
+  return el("article", { class: "track-card editing" },
+    el("h3", { class: "form-title" }, isNew ? "New track" : `Editing: ${track.display}`),
+    formField("Slug", el("input", { id: ids.slug, type: "text", value: defaults.slug })),
+    formField("Display", el("input", { id: ids.display, type: "text", value: defaults.display })),
+    formField("Stages (JSON array)",
+      el("textarea", {
+        id: ids.stages,
+        class: "md-editor json-editor",
+        rows: "10",
+        spellcheck: "false",
+      }, JSON.stringify(defaults.stages || [], null, 2)),
+    ),
+    el("p", { id: ids.err, class: "generate-error", style: { display: "none" } }),
+    el("div", { class: "editor-actions" },
+      el("button", { class: "btn-primary", onclick: onSave },
+        isNew ? "Create" : "Save"),
+      el("button", {
+        class: "btn-link",
+        onclick: () => { state.editingTrackId = null; render(); },
+      }, "Cancel"),
+      isNew ? null : el("button", {
+        class: "btn-link btn-danger",
+        onclick: onDelete,
+      }, "Delete"),
     ),
   );
 }
@@ -1376,6 +1514,7 @@ async function bootstrap() {
     agentJob: null,
     agentJobError: null,
     editingGoalId: null,
+    editingTrackId: null,
   };
   renderHome(root, state);
 }

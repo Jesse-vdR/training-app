@@ -1006,6 +1006,8 @@ button.tap:disabled:active { transform: none; }
   letter-spacing: 0.02em;
 }
 
+.track-card.editing { border-color: rgba(124, 58, 237, 0.45); }
+
 .stage-card-next, .stage-card-last {
   font-size: 0.78rem;
   margin-top: 0.4rem;
