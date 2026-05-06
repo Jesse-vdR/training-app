@@ -45,6 +45,18 @@ async function logout(apiBase) {
 const listPlans = (apiBase) => api(apiBase, "/v1/training/plans");
 const listTracks = (apiBase) => api(apiBase, "/v1/training/tracks");
 const listEvents = (apiBase) => api(apiBase, "/v1/training/events");
+const listGoals = (apiBase) => api(apiBase, "/v1/training/goals");
+
+// Singleton resources — 404 maps to null so we can render an empty state
+// rather than a hard error.
+async function getOptional(apiBase, path) {
+  const res = await fetch(`${apiBase}${path}`, { credentials: "include" });
+  if (res.status === 404) return null;
+  if (!res.ok) throw new Error(`GET ${path}: ${res.status}`);
+  return res.json();
+}
+const getProfile = (apiBase) => getOptional(apiBase, "/v1/training/profile");
+const getLongTerm = (apiBase) => getOptional(apiBase, "/v1/training/long-term");
 
 const postEvent = (apiBase, payload) =>
   api(apiBase, "/v1/training/events", {
@@ -413,6 +425,7 @@ function renderTabs(state, render) {
   const tabs = [
     { key: "today", label: "Today" },
     { key: "project", label: "Project" },
+    { key: "settings", label: "Settings" },
   ];
   return el("nav", { class: "tabs" },
     ...tabs.map((t) =>
@@ -426,6 +439,230 @@ function renderTabs(state, render) {
         },
       }, t.label),
     ),
+  );
+}
+
+// ----- Settings views -----
+
+function renderSettingsSubnav(state, render) {
+  const items = [
+    { key: "plan", label: "Plan" },
+    { key: "goals", label: "Goals" },
+    { key: "tracks", label: "Tracks" },
+    { key: "profile", label: "Profile" },
+    { key: "long-term", label: "Long-term" },
+  ];
+  return el("nav", { class: "subnav" },
+    ...items.map((it) =>
+      el("button", {
+        class: "subnav-item" + (state.settingsSection === it.key ? " active" : ""),
+        onclick: () => {
+          state.settingsSection = it.key;
+          try { localStorage.setItem("settings_section", it.key); } catch {}
+          render();
+        },
+      }, it.label),
+    ),
+  );
+}
+
+function settingsEmpty(message, hint) {
+  return el("section", { class: "empty" },
+    el("p", {}, message),
+    hint ? el("p", { class: "muted" }, hint) : null,
+  );
+}
+
+function settingsHeader(eyebrow, title) {
+  return el("header", { class: "settings-head" },
+    el("div", { class: "eyebrow" },
+      el("span", { class: "dot" }),
+      el("span", {}, eyebrow),
+    ),
+    title ? el("h2", { class: "settings-title" }, title) : null,
+  );
+}
+
+function jsonBlock(value) {
+  return el("pre", { class: "json" }, JSON.stringify(value, null, 2));
+}
+
+function settingsPlan(state) {
+  if (!state.plan) {
+    return settingsEmpty(
+      "No plan in the database.",
+      "Tap \"Generate next week's plan\" once that button lands.",
+    );
+  }
+  const days = state.plan.body.days || {};
+  const dayKeys = Object.keys(days).sort();
+  return el("section", { class: "settings-body" },
+    settingsHeader(
+      `Week of ${state.plan.week_start} · ${state.plan.generated_by}`,
+      "Current plan",
+    ),
+    el("div", { class: "plan-summary" },
+      ...dayKeys.map((d) =>
+        el("div", { class: "plan-day" },
+          el("div", { class: "plan-day-h" }, dayLabel(d)),
+          (days[d].length === 0)
+            ? el("p", { class: "muted" }, "rest")
+            : el("ul", { class: "plan-day-list" },
+                ...days[d].map((entry) =>
+                  el("li", {},
+                    el("span", { class: "plan-entry-name" }, entry.display),
+                    el("span", { class: "plan-entry-spec" },
+                      planEntrySpec(entry)),
+                  ),
+                ),
+              ),
+        ),
+      ),
+    ),
+    el("details", { class: "settings-raw" },
+      el("summary", {}, "Raw JSON"),
+      jsonBlock(state.plan.body),
+    ),
+  );
+}
+
+function planEntrySpec(entry) {
+  if (entry.unit === "reps") return `${entry.sets} × ${entry.per_set} reps`;
+  if (entry.unit === "walks") return `${entry.target_total}× walks`;
+  if (entry.unit === "duration_s") return `${entry.sets} × ${entry.per_set}s`;
+  return entry.unit;
+}
+
+function settingsGoals(state) {
+  if (!state.goals.length) {
+    return settingsEmpty("No goals defined.",
+      "Add or edit-form support lands in a follow-up.");
+  }
+  const active = state.goals.filter((g) => g.status === "active");
+  const other = state.goals.filter((g) => g.status !== "active");
+  return el("section", { class: "settings-body" },
+    settingsHeader(
+      `${active.length} active · ${state.goals.length} total`,
+      "Goals",
+    ),
+    ...state.goals.map((goal) =>
+      el("article", { class: "goal-card" },
+        el("header", { class: "goal-card-head" },
+          el("span", { class: "goal-card-name" }, goal.display),
+          el("span", { class: "goal-card-status" }, goal.status),
+        ),
+        el("div", { class: "goal-card-meta muted" },
+          [
+            goal.start_date ? `start ${goal.start_date}` : null,
+            goal.deadline ? `deadline ${goal.deadline}` : null,
+            `slug: ${goal.slug}`,
+          ].filter(Boolean).join(" · "),
+        ),
+        goal.tracks && goal.tracks.length
+          ? el("ul", { class: "goal-card-tracks" },
+              ...goal.tracks.map((t) =>
+                el("li", {},
+                  `${t.id || t.slug || "?"} → stage ${t.target_stage}`,
+                  t.weight != null
+                    ? el("span", { class: "muted" },
+                        ` · weight ${t.weight}`)
+                    : null,
+                ),
+              ),
+            )
+          : el("p", { class: "muted" }, "no track weights"),
+      ),
+    ),
+  );
+}
+
+function settingsTracks(state) {
+  if (!state.tracks.length) {
+    return settingsEmpty("No tracks defined.",
+      "Tracks were imported from tracks.json by the one-shot script.");
+  }
+  return el("section", { class: "settings-body" },
+    settingsHeader(`${state.tracks.length} tracks`, "Tracks"),
+    ...state.tracks.map((track) =>
+      el("article", { class: "track-card" },
+        el("header", { class: "track-card-head" },
+          el("span", { class: "track-card-name" }, track.display),
+          el("span", { class: "track-card-slug muted" }, track.slug),
+        ),
+        el("p", { class: "muted track-card-meta" },
+          `${(track.stages || []).length} stages`),
+        el("details", { class: "track-stages" },
+          el("summary", {}, "Stages"),
+          el("ol", { class: "track-stage-list" },
+            ...(track.stages || []).map((s) =>
+              el("li", {},
+                el("span", { class: "stage-test" }, s.test),
+                Array.isArray(s.exercises) && s.exercises.length
+                  ? el("span", { class: "muted stage-ex" },
+                      ` · ${s.exercises.join(", ")}`)
+                  : null,
+              ),
+            ),
+          ),
+        ),
+      ),
+    ),
+  );
+}
+
+function markdownBody(record) {
+  if (!record || !record.body) return null;
+  if (typeof record.body.markdown === "string") return record.body.markdown;
+  return null;
+}
+
+function settingsMarkdownView(record, eyebrow, title, emptyMsg) {
+  if (!record) return settingsEmpty(emptyMsg);
+  const md = markdownBody(record);
+  return el("section", { class: "settings-body" },
+    settingsHeader(eyebrow, title),
+    md != null
+      ? el("pre", { class: "markdown-body" }, md)
+      : el("section", { class: "empty" },
+          el("p", { class: "muted" },
+            "Body has no `markdown` field — showing raw JSON below."),
+        ),
+    md == null ? jsonBlock(record.body) : null,
+    el("p", { class: "meta updated" },
+      `updated ${record.updated_at}`),
+  );
+}
+
+function settingsProfile(state) {
+  return settingsMarkdownView(
+    state.profile,
+    "rendered as plain text for now",
+    "Profile",
+    "No profile saved yet.",
+  );
+}
+
+function settingsLongTerm(state) {
+  return settingsMarkdownView(
+    state.longTerm,
+    "rendered as plain text for now",
+    "Long-term plan",
+    "No long-term plan saved yet.",
+  );
+}
+
+function renderSettingsMain(state, render) {
+  const sections = {
+    "plan": settingsPlan,
+    "goals": settingsGoals,
+    "tracks": settingsTracks,
+    "profile": settingsProfile,
+    "long-term": settingsLongTerm,
+  };
+  const fn = sections[state.settingsSection] || settingsPlan;
+  return el("main", { class: "stage" },
+    renderSettingsSubnav(state, render),
+    fn(state),
   );
 }
 
@@ -491,9 +728,10 @@ function renderProjectMain(state) {
 
 function renderHome(root, state) {
   const render = () => renderHome(root, state);
-  const main = state.view === "project"
-    ? renderProjectMain(state)
-    : renderTodayMain(state, render);
+  let main;
+  if (state.view === "project") main = renderProjectMain(state);
+  else if (state.view === "settings") main = renderSettingsMain(state, render);
+  else main = renderTodayMain(state, render);
   root.replaceChildren(
     renderTopbar(state),
     renderTabs(state, render),
@@ -547,12 +785,15 @@ async function bootstrap() {
     return;
   }
 
-  let plans, tracks, events;
+  let plans, tracks, events, goals, profile, longTerm;
   try {
-    [plans, tracks, events] = await Promise.all([
+    [plans, tracks, events, goals, profile, longTerm] = await Promise.all([
       listPlans(apiBase),
       listTracks(apiBase),
       listEvents(apiBase),
+      listGoals(apiBase),
+      getProfile(apiBase),
+      getLongTerm(apiBase),
     ]);
   } catch (err) {
     renderError(root, `Failed to load training data: ${err.message}`,
@@ -564,20 +805,31 @@ async function bootstrap() {
   const plan = plans[0] || null;
   const state = {
     user, apiBase, sha,
-    plan, tracks, events,
+    plan, tracks, events, goals, profile, longTerm,
     today,
     viewDate: pickViewDate(plan, today),
     view: storedView(),
+    settingsSection: storedSettingsSection(),
   };
   renderHome(root, state);
 }
 
+const SETTINGS_SECTIONS = ["plan", "goals", "tracks", "profile", "long-term"];
+
 function storedView() {
   try {
     const v = localStorage.getItem("view");
-    if (v === "today" || v === "project") return v;
+    if (v === "today" || v === "project" || v === "settings") return v;
   } catch {}
   return "today";
+}
+
+function storedSettingsSection() {
+  try {
+    const v = localStorage.getItem("settings_section");
+    if (SETTINGS_SECTIONS.includes(v)) return v;
+  } catch {}
+  return "plan";
 }
 
 bootstrap();
