@@ -74,6 +74,20 @@ const postAgentJob = (apiBase, payload) =>
 
 const getAgentJob = (apiBase, id) => api(apiBase, `/v1/agents/jobs/${id}`);
 
+const putProfile = (apiBase, body) =>
+  api(apiBase, "/v1/training/profile", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ body }),
+  });
+
+const putLongTerm = (apiBase, body) =>
+  api(apiBase, "/v1/training/long-term", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ body }),
+  });
+
 // ----- Helpers -----
 
 function isoFromDate(d) {
@@ -758,39 +772,96 @@ function markdownBody(record) {
   return null;
 }
 
-function settingsMarkdownView(record, eyebrow, title, emptyMsg) {
-  if (!record) return settingsEmpty(emptyMsg);
-  const md = markdownBody(record);
+function settingsMarkdownEditor(state, render, opts) {
+  const { record, eyebrow, title, emptyMsg, onSave } = opts;
+  const md = record ? markdownBody(record) : "";
+  const initial = md != null ? md : "";
+  const textareaId = `editor-${title.replace(/\W/g, "-").toLowerCase()}`;
+
+  const onSaveClick = async (ev) => {
+    const btn = ev.currentTarget;
+    const ta = document.getElementById(textareaId);
+    const text = ta ? ta.value : "";
+    btn.disabled = true;
+    btn.textContent = "Saving…";
+    try {
+      const updated = await onSave(state.apiBase, { markdown: text });
+      // Mutate the right state slot via the same onSave context.
+      // The caller patched state for us before resolving.
+      render();
+      toast(`${title} saved`, "success");
+    } catch (err) {
+      btn.disabled = false;
+      btn.textContent = "Save";
+      toast(`${title} save failed: ${err.message}`);
+    }
+  };
+
   return el("section", { class: "settings-body" },
-    settingsHeader(eyebrow, title),
-    md != null
-      ? el("pre", { class: "markdown-body" }, md)
-      : el("section", { class: "empty" },
+    settingsHeader(
+      record ? `updated ${record.updated_at}` : eyebrow,
+      title,
+    ),
+    !record && md == null
+      ? el("section", { class: "empty" },
+          el("p", { class: "muted" }, emptyMsg),
           el("p", { class: "muted" },
-            "Body has no `markdown` field — showing raw JSON below."),
-        ),
-    md == null ? jsonBlock(record.body) : null,
-    el("p", { class: "meta updated" },
-      `updated ${record.updated_at}`),
+            "Type below and Save to create."),
+        )
+      : null,
+    record && markdownBody(record) == null
+      ? el("p", { class: "muted body-warn" },
+          "Existing body has no `markdown` field — saving will replace it.")
+      : null,
+    el("textarea", {
+      id: textareaId,
+      class: "md-editor",
+      rows: "16",
+      spellcheck: "false",
+      placeholder: emptyMsg,
+    }, initial),
+    el("div", { class: "editor-actions" },
+      el("button", {
+        class: "btn-primary",
+        onclick: onSaveClick,
+      }, "Save"),
+      el("button", {
+        class: "btn-link",
+        onclick: () => {
+          const ta = document.getElementById(textareaId);
+          if (ta) ta.value = initial;
+        },
+      }, "Reset"),
+    ),
   );
 }
 
-function settingsProfile(state) {
-  return settingsMarkdownView(
-    state.profile,
-    "rendered as plain text for now",
-    "Profile",
-    "No profile saved yet.",
-  );
+function settingsProfile(state, render) {
+  return settingsMarkdownEditor(state, render, {
+    record: state.profile,
+    eyebrow: "Markdown body",
+    title: "Profile",
+    emptyMsg: "No profile saved yet.",
+    onSave: async (apiBase, body) => {
+      const updated = await putProfile(apiBase, body);
+      state.profile = updated;
+      return updated;
+    },
+  });
 }
 
-function settingsLongTerm(state) {
-  return settingsMarkdownView(
-    state.longTerm,
-    "rendered as plain text for now",
-    "Long-term plan",
-    "No long-term plan saved yet.",
-  );
+function settingsLongTerm(state, render) {
+  return settingsMarkdownEditor(state, render, {
+    record: state.longTerm,
+    eyebrow: "Markdown body",
+    title: "Long-term plan",
+    emptyMsg: "No long-term plan saved yet.",
+    onSave: async (apiBase, body) => {
+      const updated = await putLongTerm(apiBase, body);
+      state.longTerm = updated;
+      return updated;
+    },
+  });
 }
 
 function renderSettingsMain(state, render) {

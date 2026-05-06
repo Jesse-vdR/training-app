@@ -615,6 +615,49 @@ button.tap:disabled:active { transform: none; }
   overflow-x: auto;
 }
 
+.md-editor {
+  width: 100%;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.82rem;
+  line-height: 1.55;
+  color: var(--fg);
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 0.95rem 1rem;
+  resize: vertical;
+  min-height: 16rem;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.md-editor:focus {
+  outline: none;
+  border-color: var(--accent-2);
+}
+
+.editor-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.85rem;
+}
+
+.editor-actions .btn-primary {
+  margin-top: 0;
+  padding: 0.55rem 1.1rem;
+  font-size: 0.88rem;
+}
+
+.body-warn {
+  font-size: 0.78rem;
+  margin: 0 0 0.5rem;
+  padding: 0.45rem 0.6rem;
+  background: rgba(245, 158, 11, 0.08);
+  border: 1px solid rgba(245, 158, 11, 0.3);
+  border-radius: 8px;
+  color: #fbbf24;
+}
+
 .updated {
   margin-top: 0.5rem;
   text-align: right;
