@@ -4,7 +4,7 @@ Vanilla-JS PWA for the training subsystem. Reads from / writes to [`personal-api
 
 ## Status
 
-Phase 4 — project view + tab nav. Today / Project tabs persist via localStorage. Project view renders the last 12 weeks as a Mon–Sun grid with per-kind dots for stage passes / runs / sessions. Service worker + install manifest land next.
+Phase 5 — installable PWA. `manifest.json`, `service-worker.js`, and 192/512 icons land. The SW pre-caches the app shell on install (best-effort) and goes network-first with cache fallback for everything else. `version.txt`, `/data/api_base.json`, and the SW itself are excluded from caching so deploys propagate. The rewrite ticket [#3](https://github.com/Jesse-vdR/training-app/issues/3) closes once this lands.
 
 ## Local dev
 
@@ -37,9 +37,13 @@ Reuses the same secrets as `personal-api`: `SSH_PRIVATE_KEY`, `SSH_HOST`, `SSH_U
 ## Layout
 
 ```
-index.html              app shell mount point
-app.js                  bootstrap — config, /v1/me, login/home views
+index.html              app shell mount point + manifest / icon links
+app.js                  bootstrap — config, /v1/me, today/project views, SW reg
 style.css
+manifest.json           PWA install metadata
+service-worker.js       offline shell + cache-on-fetch
+icon-192.png            home-screen icon (192×192)
+icon-512.png            home-screen icon (512×512)
 data/api_base.json      API base URL, edited at deploy time per env
 nginx/                  nginx site config (synced to /etc/nginx/sites-available/)
 scripts/deploy.sh       runs on VM after rsync
