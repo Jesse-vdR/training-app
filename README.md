@@ -4,7 +4,7 @@ Vanilla-JS PWA for the training subsystem. Reads from / writes to [`personal-api
 
 ## Status
 
-Phase 1 — foundation + deploy. Auth, today view, project view, stage_pass logging, and service worker land in subsequent phases.
+Phase 2 — auth bootstrap. Login / sign-out wired against `personal-api`'s Google OAuth + session cookie. Today view, project view, stage_pass logging, and service worker land in subsequent phases.
 
 ## Local dev
 
@@ -37,8 +37,8 @@ Reuses the same secrets as `personal-api`: `SSH_PRIVATE_KEY`, `SSH_HOST`, `SSH_U
 ## Layout
 
 ```
-index.html              app shell (placeholder until Phase 2)
-app.js                  bootstrap — loads config + SHA, mounts views
+index.html              app shell mount point
+app.js                  bootstrap — config, /v1/me, login/home views
 style.css
 data/api_base.json      API base URL, edited at deploy time per env
 nginx/                  nginx site config (synced to /etc/nginx/sites-available/)
