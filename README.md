@@ -4,7 +4,7 @@ Vanilla-JS PWA for the training subsystem. Reads from / writes to [`personal-api
 
 ## Status
 
-Phase 2 — auth bootstrap. Login / sign-out wired against `personal-api`'s Google OAuth + session cookie. Today view, project view, stage_pass logging, and service worker land in subsequent phases.
+Phase 3 — today view + stage_pass logging. Signed-in app fetches the latest plan, the user's tracks, and all events; renders the day's plan items with tap-to-log buttons and a per-track "Pass next stage" section. Project view and the service worker land in subsequent phases.
 
 ## Local dev
 
