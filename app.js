@@ -4,6 +4,8 @@
 // then renders the today view with tap-to-log buttons. Stage passes
 // land via the same /v1/training/events endpoint.
 
+import { Shell, heatColor } from "/shell/shell.js";
+
 // ----- API -----
 
 async function loadConfig() {
@@ -26,20 +28,6 @@ async function api(apiBase, path, opts = {}) {
     throw new Error(`${opts.method || "GET"} ${path}: ${res.status}`);
   }
   return res.status === 204 ? null : res.json();
-}
-
-async function getMe(apiBase) {
-  const res = await fetch(`${apiBase}/v1/me`, { credentials: "include" });
-  if (res.status === 401) return null;
-  if (!res.ok) throw new Error(`/v1/me failed: ${res.status}`);
-  return res.json();
-}
-
-async function logout(apiBase) {
-  await fetch(`${apiBase}/v1/auth/logout`, {
-    method: "POST",
-    credentials: "include",
-  });
 }
 
 const listPlans = (apiBase) => api(apiBase, "/v1/training/plans");
@@ -318,26 +306,6 @@ function renderError(root, message, ctx = {}) {
 
 // ----- Render: signed-in shell -----
 
-function renderTopbar(state) {
-  const onSignOut = async () => {
-    await logout(state.apiBase);
-    window.location.reload();
-  };
-  return el("header", { class: "topbar" },
-    el("a", { class: "brand-link", href: "https://jesselab.space/", title: "Back to jesselab.space" },
-      el("span", { class: "brand-arrow", "aria-hidden": "true" }, "←"),
-      el("span", { class: "brand" }, "homepage"),
-    ),
-    el("div", { class: "user" },
-      state.user.avatar_url
-        ? el("img", { src: state.user.avatar_url, alt: "", class: "avatar" })
-        : null,
-      el("span", { class: "user-name" }, state.user.name || state.user.email),
-      el("button", { class: "btn-link", onclick: onSignOut }, "Sign out"),
-    ),
-  );
-}
-
 function renderDayHeader(state, render) {
   const days = state.plan
     ? Object.keys(state.plan.body.days || {}).sort()
@@ -426,21 +394,38 @@ function renderEntry(state, entry, render) {
     }
   };
 
+  // Segmented gradient bar — 12 cells max, fewer if target_total is smaller.
+  const cellCount = Math.min(12, Math.max(1, entry.target_total));
+  const litCells = Math.round((done / entry.target_total) * cellCount);
+  const cells = [];
+  for (let i = 0; i < cellCount; i++) {
+    cells.push(el("div", {
+      class: `shell-bar-seg__cell${i < litCells ? " is-on" : ""}`,
+    }));
+  }
+  const bar = el("div", { class: "shell-bar-seg" }, ...cells);
+
+  // Dynamic TAP button — color matches the next cell about to light.
+  const btnColor = heatColor(done, entry.target_total);
+
   return el("div", {
     class: "ex" + (isDone ? " done" : ""),
-    style: { "--pct": `${pct}%` },
   },
     el("div", { class: "ex-header" },
       el("span", { class: "ex-title" }, entry.display),
       el("span", { class: "ex-spec" }, spec),
     ),
-    el("div", { class: "progress-bar" }),
+    bar,
     el("div", { class: "ex-footer" },
       el("span", { class: "ex-count" }, count),
       el("button", {
-        class: "tap",
-        disabled: !canLog ? "" : null,
+        class: "shell-btn-primary tap",
+        style: {
+          "--btn-color": btnColor,
+          "--btn-glow": `${btnColor}73`,
+        },
         onclick: onTap,
+        disabled: !canLog || (entry.unit === "session" && isDone) ? "" : null,
       }, btnLabel),
     ),
   );
@@ -1434,7 +1419,6 @@ function renderHome(root, state) {
   else if (state.view === "settings") main = renderSettingsMain(state, render);
   else main = renderTodayMain(state, render);
   root.replaceChildren(
-    renderTopbar(state),
     renderTabs(state, render),
     main,
     el("footer", { class: "appfoot" }, meta(state.apiBase, state.sha)),
@@ -1474,13 +1458,19 @@ async function bootstrap() {
   }
   const apiBase = config.api_base;
 
-  let user;
+  // Shell.mount happens before the user check so the topbar appears
+  // on the login screen too (with a SIGN IN link in the user widget).
+  Shell.mount({
+    mode: "subapp",
+    apiBase,
+    homeUrl: "https://jesselab.space/",
+  });
+
+  let user = null;
   try {
-    user = await getMe(apiBase);
-  } catch (err) {
-    renderError(root, `Couldn't reach API: ${err.message}`, { apiBase, sha });
-    return;
-  }
+    const res = await fetch(`${apiBase}/v1/me`, { credentials: "include" });
+    if (res.status !== 401 && res.ok) user = await res.json();
+  } catch { /* offline — fall through to login screen */ }
   if (!user) {
     renderLogin(root, { apiBase, sha });
     return;

@@ -2,7 +2,7 @@
 // individual file failures don't abort install). Serves from cache when
 // the network is unavailable. Bump CACHE on intentional cache flush.
 
-const CACHE = "training-app-v2";
+const CACHE = "training-app-v3";
 
 const SHELL = [
   "/",
@@ -11,6 +11,11 @@ const SHELL = [
   "/manifest.json",
   "/icon-192.png",
   "/icon-512.png",
+  // Shared design-system shell (served same-origin via nginx alias).
+  "/shell/shell.css",
+  "/shell/shell.js",
+  "/shell/fonts/Geist-Variable.woff2",
+  "/shell/fonts/GeistMono-Variable.woff2",
 ];
 
 // Always go to network — these are the version stamp + the API base
