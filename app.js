@@ -326,7 +326,7 @@ function renderTopbar(state) {
   return el("header", { class: "topbar" },
     el("a", { class: "brand-link", href: "https://jesselab.space/", title: "Back to jesselab.space" },
       el("span", { class: "brand-arrow", "aria-hidden": "true" }, "←"),
-      el("span", { class: "brand" }, "training"),
+      el("span", { class: "brand" }, "homepage"),
     ),
     el("div", { class: "user" },
       state.user.avatar_url
