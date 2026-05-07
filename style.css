@@ -1,34 +1,3 @@
-:root {
-  color-scheme: dark;
-  --bg: #0a0b10;
-  --bg-2: #12131b;
-  --bg-3: #0f1119;
-  --fg: #f1f5f9;
-  --muted: #94a3b8;
-  --dim: #64748b;
-  --line: #1e2130;
-  --accent: #7c3aed;
-  --accent-2: #06b6d4;
-  --warn: #f59e0b;
-  --ok: #22c55e;
-  --danger: #ef4444;
-}
-
-* { box-sizing: border-box; margin: 0; padding: 0; }
-
-html, body {
-  background: radial-gradient(ellipse at top, #151724 0%, var(--bg) 60%);
-  background-attachment: fixed;
-  color: var(--fg);
-  font-family: "Inter", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  min-height: 100vh;
-  -webkit-font-smoothing: antialiased;
-}
-
-body {
-  font-size: 16px;
-}
-
 #app {
   min-height: 100vh;
   display: flex;
@@ -88,77 +57,6 @@ body {
 }
 
 .btn-primary:active { filter: brightness(0.92); }
-
-/* ===== Top bar ===== */
-
-.topbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0.75rem 1rem;
-  border-bottom: 1px solid var(--line);
-  background: rgba(10, 11, 16, 0.85);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  position: sticky;
-  top: 0;
-  z-index: 5;
-}
-
-.brand-link {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.4rem;
-  text-decoration: none;
-  -webkit-tap-highlight-color: transparent;
-}
-
-.brand-arrow {
-  color: var(--muted);
-  font-size: 1rem;
-  line-height: 1;
-  transition: color 0.15s, transform 0.15s;
-}
-
-.brand-link:hover .brand-arrow,
-.brand-link:active .brand-arrow {
-  color: var(--accent-2);
-  transform: translateX(-2px);
-}
-
-.brand {
-  font-weight: 600;
-  letter-spacing: -0.01em;
-  font-size: 0.95rem;
-  background: linear-gradient(135deg, #f1f5f9, #c4b5fd 60%, #fbbf24);
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
-}
-
-.user { display: flex; align-items: center; gap: 0.5rem; font-size: 0.85rem; }
-
-.avatar { width: 28px; height: 28px; border-radius: 50%; display: block; }
-
-.user-name {
-  color: var(--muted);
-  max-width: 12ch;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.btn-link {
-  background: none;
-  border: none;
-  color: var(--muted);
-  font-size: 0.85rem;
-  cursor: pointer;
-  padding: 0.25rem 0.5rem;
-  font-family: inherit;
-}
-
-.btn-link:active { color: var(--fg); }
 
 /* ===== Tabs ===== */
 
@@ -1097,11 +995,4 @@ button.tap:disabled:active { transform: none; }
   /* Weekly grid cells were sized for the 500px container; with more
      room each cell can be a touch taller so the heatmap reads better. */
   .grid-cell { height: 2.6rem; }
-
-  /* Topbar bound to the same max-width as the stage so brand and user
-     widget don't drift to the screen edges on a wide monitor. */
-  .topbar {
-    padding-left: max(1rem, calc((100vw - 760px) / 2));
-    padding-right: max(1rem, calc((100vw - 760px) / 2));
-  }
 }
