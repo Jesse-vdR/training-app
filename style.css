@@ -513,6 +513,41 @@ button.tap:disabled:active { transform: none; }
   text-align: right;
 }
 
+/* Plan week navigation */
+
+.plan-week-nav {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.2rem;
+}
+
+.plan-week-title {
+  flex: 1;
+  margin: 0;
+  text-align: center;
+}
+
+.plan-week-arrow {
+  background: var(--surface);
+  color: var(--fg);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0.2rem 0.6rem;
+  min-width: 2.25rem;
+  font-size: 0.85rem;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.plan-week-arrow:hover:not(:disabled) { filter: brightness(1.08); }
+.plan-week-arrow:active:not(:disabled) { filter: brightness(0.92); }
+
+.plan-week-arrow:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
 /* Generate plan card */
 
 .generate-card {
