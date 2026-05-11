@@ -495,12 +495,7 @@ button.tap:disabled:active { transform: none; }
   align-items: center;
   gap: 0.5rem;
   margin-top: 0.85rem;
-}
-
-.editor-actions .btn-primary {
-  margin-top: 0;
-  padding: 0.55rem 1.1rem;
-  font-size: 0.88rem;
+  flex-wrap: wrap;
 }
 
 .body-warn {
@@ -720,11 +715,7 @@ button.tap:disabled:active { transform: none; }
   margin: 0 0 0.85rem;
 }
 
-.add-btn {
-  margin-top: 0;
-  padding: 0.5rem 1rem;
-  font-size: 0.85rem;
-}
+.add-btn { margin-top: 0; }
 
 .card-actions {
   display: flex;
@@ -733,15 +724,15 @@ button.tap:disabled:active { transform: none; }
   margin-top: 0.55rem;
   border-top: 1px dashed var(--line);
   padding-top: 0.5rem;
+  flex-wrap: wrap;
 }
 
-.card-actions .btn-link {
-  font-size: 0.78rem;
-  padding: 0.3rem 0.6rem;
+.shell-btn-secondary.btn-danger { color: #fca5a5; }
+.shell-btn-secondary.btn-danger:hover {
+  border-color: rgba(239, 68, 68, 0.45);
+  color: var(--danger);
 }
-
-.btn-danger { color: #fca5a5; }
-.btn-danger:active { color: var(--danger); }
+.shell-btn-secondary.btn-danger:active { color: var(--danger); }
 
 /* Forms inside cards */
 

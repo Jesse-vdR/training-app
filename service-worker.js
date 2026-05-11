@@ -2,7 +2,7 @@
 // individual file failures don't abort install). Serves from cache when
 // the network is unavailable. Bump CACHE on intentional cache flush.
 
-const CACHE = "training-app-v3";
+const CACHE = "training-app-v4";
 
 const SHELL = [
   "/",

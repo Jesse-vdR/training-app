@@ -637,9 +637,9 @@ function renderPlanJsonEditor(state, render) {
     }, initial),
     el("p", { id: errId, class: "generate-error", style: { display: "none" } }),
     el("div", { class: "editor-actions" },
-      el("button", { class: "btn-primary", onclick: onSave }, "Save"),
+      el("button", { class: "shell-btn-primary", onclick: onSave }, "Save"),
       el("button", {
-        class: "btn-link",
+        class: "shell-btn-secondary",
         onclick: () => {
           const ta = document.getElementById(taId);
           if (ta) ta.value = initial;
@@ -790,7 +790,7 @@ function settingsGoals(state, render) {
       adding
         ? null
         : el("button", {
-            class: "btn-primary add-btn",
+            class: "shell-btn-primary add-btn",
             onclick: () => { state.editingGoalId = 0; render(); },
           }, "+ Add goal"),
     ),
@@ -846,11 +846,11 @@ function renderGoalCard(state, render, goal) {
       : el("p", { class: "muted" }, "no track weights"),
     el("div", { class: "card-actions" },
       el("button", {
-        class: "btn-link",
+        class: "shell-btn-secondary",
         onclick: () => { state.editingGoalId = goal.id; render(); },
       }, "Edit"),
       el("button", {
-        class: "btn-link",
+        class: "shell-btn-secondary",
         onclick: onToggleStatus,
       }, isActive ? "Mark met" : "Reactivate"),
     ),
@@ -965,14 +965,14 @@ function renderGoalForm(state, render, goal) {
     ),
     el("p", { id: ids.err, class: "generate-error", style: { display: "none" } }),
     el("div", { class: "editor-actions" },
-      el("button", { class: "btn-primary", onclick: onSave },
+      el("button", { class: "shell-btn-primary", onclick: onSave },
         isNew ? "Create" : "Save"),
       el("button", {
-        class: "btn-link",
+        class: "shell-btn-secondary",
         onclick: () => { state.editingGoalId = null; render(); },
       }, "Cancel"),
       isNew ? null : el("button", {
-        class: "btn-link btn-danger",
+        class: "shell-btn-secondary btn-danger",
         onclick: onDelete,
       }, "Delete"),
     ),
@@ -994,7 +994,7 @@ function settingsTracks(state, render) {
       adding
         ? null
         : el("button", {
-            class: "btn-primary add-btn",
+            class: "shell-btn-primary add-btn",
             onclick: () => { state.editingTrackId = 0; render(); },
           }, "+ Add track"),
     ),
@@ -1034,7 +1034,7 @@ function renderTrackCard(state, render, track) {
     ),
     el("div", { class: "card-actions" },
       el("button", {
-        class: "btn-link",
+        class: "shell-btn-secondary",
         onclick: () => { state.editingTrackId = track.id; render(); },
       }, "Edit"),
     ),
@@ -1127,14 +1127,14 @@ function renderTrackForm(state, render, track) {
     ),
     el("p", { id: ids.err, class: "generate-error", style: { display: "none" } }),
     el("div", { class: "editor-actions" },
-      el("button", { class: "btn-primary", onclick: onSave },
+      el("button", { class: "shell-btn-primary", onclick: onSave },
         isNew ? "Create" : "Save"),
       el("button", {
-        class: "btn-link",
+        class: "shell-btn-secondary",
         onclick: () => { state.editingTrackId = null; render(); },
       }, "Cancel"),
       isNew ? null : el("button", {
-        class: "btn-link btn-danger",
+        class: "shell-btn-secondary btn-danger",
         onclick: onDelete,
       }, "Delete"),
     ),
@@ -1197,11 +1197,11 @@ function settingsMarkdownEditor(state, render, opts) {
     }, initial),
     el("div", { class: "editor-actions" },
       el("button", {
-        class: "btn-primary",
+        class: "shell-btn-primary",
         onclick: onSaveClick,
       }, "Save"),
       el("button", {
-        class: "btn-link",
+        class: "shell-btn-secondary",
         onclick: () => {
           const ta = document.getElementById(textareaId);
           if (ta) ta.value = initial;
