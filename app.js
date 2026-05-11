@@ -310,13 +310,12 @@ function renderError(root, message, ctx = {}) {
 // ----- Render: signed-in shell -----
 
 function renderDayHeader(state, render) {
-  const days = state.plan
-    ? Object.keys(state.plan.body.days || {}).sort()
-    : [];
+  const plan = state.todayPlan;
+  const days = plan ? Object.keys(plan.body.days || {}).sort() : [];
   const idx = days.indexOf(state.viewDate);
-  const eyebrowText = state.plan
-    ? `Week of ${state.plan.week_start}`
-    : "training";
+  const eyebrowText = plan
+    ? `Week of ${plan.week_start}`
+    : "no plan for this week";
 
   return el("header", { class: "day-header" },
     el("div", { class: "eyebrow" },
@@ -435,13 +434,25 @@ function renderEntry(state, entry, render) {
 }
 
 function renderPlanSection(state, render) {
-  if (!state.plan) {
+  const plan = state.todayPlan;
+  if (!plan) {
+    const thisWeek = isoMonday(state.today);
+    const inFlight = state.agentJob
+      && state.agentJob.status !== "succeeded"
+      && state.agentJob.status !== "failed";
     return el("section", { class: "empty" },
-      el("p", {}, "No plan yet."),
-      el("p", { class: "muted" }, "Generate one in settings (coming soon)."),
+      el("p", {}, `No plan for the week of ${thisWeek}.`),
+      el("button", {
+        class: "btn-primary generate-btn",
+        disabled: inFlight ? "" : null,
+        onclick: () => generatePlan(state, render, thisWeek),
+      }, inFlight ? "Generating…" : "Generate this week's plan"),
+      state.agentJobError
+        ? el("p", { class: "generate-error" }, state.agentJobError)
+        : null,
     );
   }
-  const entries = (state.plan.body.days || {})[state.viewDate] || [];
+  const entries = (plan.body.days || {})[state.viewDate] || [];
   if (entries.length === 0) {
     return el("section", { class: "empty" },
       el("p", {}, `Nothing planned for ${state.viewDate}.`),
@@ -659,6 +670,7 @@ function renderPlanJsonEditor(state, render, plan) {
       const i = list.findIndex((p) => p.id === updated.id);
       if (i >= 0) list[i] = updated;
       state.plan = list[0] || updated;
+      state.todayPlan = planForWeekContaining(list, state.today);
       render();
       toast("Plan saved", "success");
     } catch (err) {
@@ -900,7 +912,9 @@ async function generatePlan(state, render, week_start) {
         const plans = await listPlans(apiBase);
         state.plans = plans;
         state.plan = plans[0] || null;
+        state.todayPlan = planForWeekContaining(plans, state.today);
         state.settingsPlanIdx = 0;
+        if (state.todayPlan) state.viewDate = pickViewDate(state.todayPlan, state.today);
       } catch {}
       render();
       toast(`Plan generated for week of ${week_start}`, "success");
@@ -1597,6 +1611,11 @@ function pickViewDate(plan, today) {
   return days[0] || today;
 }
 
+function planForWeekContaining(plans, iso) {
+  const ws = isoMonday(iso);
+  return (plans || []).find((p) => p.week_start === ws) || null;
+}
+
 async function bootstrap() {
   const root = document.getElementById("app");
   let config, sha;
@@ -1644,11 +1663,12 @@ async function bootstrap() {
 
   const today = todayLocalISO();
   const plan = plans[0] || null;
+  const todayPlan = planForWeekContaining(plans, today);
   const state = {
     user, apiBase, sha,
-    plan, plans, tracks, events, goals, profile, longTerm,
+    plan, todayPlan, plans, tracks, events, goals, profile, longTerm,
     today,
-    viewDate: pickViewDate(plan, today),
+    viewDate: pickViewDate(todayPlan, today),
     view: storedView(),
     settingsSection: storedSettingsSection(),
     settingsPlanIdx: 0,
