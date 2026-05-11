@@ -573,6 +573,99 @@ button.tap:disabled:active { transform: none; }
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
+.generate-summary-wrap { display: flex; flex-direction: column; gap: 0.35rem; }
+
+.generate-summary {
+  margin: 0;
+  font-size: 0.78rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.generate-inputs {
+  font-size: 0.78rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0.35rem 0.6rem;
+  background: var(--surface-2, transparent);
+}
+
+.generate-inputs > summary {
+  cursor: pointer;
+  font-size: 0.78rem;
+  padding: 0.1rem 0;
+  user-select: none;
+}
+
+.generate-inputs-section {
+  margin-top: 0.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.generate-inputs-h {
+  font-size: 0.72rem;
+  margin: 0;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--muted);
+  text-transform: uppercase;
+}
+
+.generate-inputs-pre {
+  margin: 0;
+  font-size: 0.72rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 12rem;
+  overflow: auto;
+  background: rgba(0, 0, 0, 0.15);
+  padding: 0.4rem 0.55rem;
+  border-radius: 6px;
+}
+
+.generate-context-label {
+  font-size: 0.78rem;
+  margin-bottom: -0.25rem;
+}
+
+.generate-context {
+  width: 100%;
+  resize: vertical;
+  min-height: 3rem;
+  font: inherit;
+  font-size: 0.85rem;
+  padding: 0.5rem 0.6rem;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: var(--surface-2, var(--surface));
+  color: var(--fg);
+  box-sizing: border-box;
+}
+
+.generate-context:disabled { opacity: 0.6; cursor: progress; }
+
+.generate-done { display: flex; flex-direction: column; gap: 0.35rem; }
+
+.generate-rationale {
+  margin: 0;
+  font-size: 0.82rem;
+  line-height: 1.45;
+  padding: 0.5rem 0.65rem;
+  border-radius: 8px;
+  background: rgba(34, 197, 94, 0.08);
+  border: 1px solid rgba(34, 197, 94, 0.25);
+}
+
+.generate-rationale-label {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.72rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  margin-right: 0.35rem;
+}
+
 /* Plan summary */
 
 .plan-summary { display: block; }
