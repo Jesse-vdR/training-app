@@ -573,21 +573,58 @@ function settingsPlan(state, render) {
   const target = nextMonday(state.today);
   const upToDate = state.plan && state.plan.week_start === target;
 
+  const idx = state.settingsPlanIdx ?? 0;
+  const list = state.plans || [];
+  const viewed = list[idx] || null;
+  const isCurrent = idx === 0;
+  const hasNewer = idx > 0;
+  const hasOlder = idx < list.length - 1;
+
+  const header = viewed
+    ? renderPlanWeekHeader(state, render, viewed, isCurrent, hasNewer, hasOlder)
+    : settingsHeader("No plan yet", "Plan");
+
   return el("section", { class: "settings-body" },
-    state.plan
-      ? settingsHeader(
-          `Week of ${state.plan.week_start} · ${state.plan.generated_by}`,
-          "Current plan",
-        )
-      : settingsHeader("No plan yet", "Plan"),
+    header,
     renderGeneratePlanCard(state, render, target, upToDate),
-    state.plan ? renderPlanSummary(state.plan) : null,
-    state.plan ? renderPlanJsonEditor(state, render) : null,
+    viewed ? renderPlanSummary(viewed) : null,
+    viewed ? renderPlanJsonEditor(state, render, viewed) : null,
   );
 }
 
-function renderPlanJsonEditor(state, render) {
-  const plan = state.plan;
+function renderPlanWeekHeader(state, render, viewed, isCurrent, hasNewer, hasOlder) {
+  const stepPlan = (delta) => {
+    const list = state.plans || [];
+    const next = (state.settingsPlanIdx ?? 0) + delta;
+    if (next < 0 || next >= list.length) return;
+    state.settingsPlanIdx = next;
+    render();
+  };
+  return el("header", { class: "settings-head plan-week-head" },
+    el("div", { class: "eyebrow" },
+      el("span", { class: "dot" }),
+      el("span", {}, `Week of ${viewed.week_start} · ${viewed.generated_by}`),
+    ),
+    el("div", { class: "plan-week-nav" },
+      el("button", {
+        class: "plan-week-arrow",
+        disabled: hasOlder ? null : "",
+        onclick: () => stepPlan(1),
+        "aria-label": "Previous week",
+      }, "◀"),
+      el("h2", { class: "settings-title plan-week-title" },
+        isCurrent ? "Current plan" : "Past plan"),
+      el("button", {
+        class: "plan-week-arrow",
+        disabled: hasNewer ? null : "",
+        onclick: () => stepPlan(-1),
+        "aria-label": "Next week",
+      }, "▶"),
+    ),
+  );
+}
+
+function renderPlanJsonEditor(state, render, plan) {
   const initial = JSON.stringify(plan.body, null, 2);
   const taId = "plan-json-editor";
   const errId = "plan-json-error";
@@ -618,7 +655,10 @@ function renderPlanJsonEditor(state, render) {
     btn.textContent = "Saving…";
     try {
       const updated = await patchPlan(state.apiBase, plan.id, { body: parsed });
-      state.plan = updated;
+      const list = state.plans || [];
+      const i = list.findIndex((p) => p.id === updated.id);
+      if (i >= 0) list[i] = updated;
+      state.plan = list[0] || updated;
       render();
       toast("Plan saved", "success");
     } catch (err) {
@@ -858,7 +898,9 @@ async function generatePlan(state, render, week_start) {
     if (updated.status === "succeeded") {
       try {
         const plans = await listPlans(apiBase);
-        if (plans[0]) state.plan = plans[0];
+        state.plans = plans;
+        state.plan = plans[0] || null;
+        state.settingsPlanIdx = 0;
       } catch {}
       render();
       toast(`Plan generated for week of ${week_start}`, "success");
@@ -1604,11 +1646,12 @@ async function bootstrap() {
   const plan = plans[0] || null;
   const state = {
     user, apiBase, sha,
-    plan, tracks, events, goals, profile, longTerm,
+    plan, plans, tracks, events, goals, profile, longTerm,
     today,
     viewDate: pickViewDate(plan, today),
     view: storedView(),
     settingsSection: storedSettingsSection(),
+    settingsPlanIdx: 0,
     agentJob: null,
     agentJobError: null,
     generatePreview: null,
