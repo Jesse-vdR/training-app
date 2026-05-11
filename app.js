@@ -62,6 +62,9 @@ const postAgentJob = (apiBase, payload) =>
 
 const getAgentJob = (apiBase, id) => api(apiBase, `/v1/agents/jobs/${id}`);
 
+const getGeneratePlanPreview = (apiBase, weekStart) =>
+  api(apiBase, `/v1/agents/generate-plan/preview?week_start=${encodeURIComponent(weekStart)}`);
+
 const putProfile = (apiBase, body) =>
   api(apiBase, "/v1/training/profile", {
     method: "PUT",
@@ -685,12 +688,29 @@ function renderGeneratePlanCard(state, render, target, upToDate) {
     : job.status === "running" ? `Generating · ${elapsedS}s`
     : null;
 
+  ensureGeneratePreview(state, render, target);
+  const rationale = job && job.status === "succeeded" && job.output
+    ? (job.output.rationale || "").trim()
+    : "";
+
   return el("div", { class: "generate-card" },
     el("div", { class: "generate-card-h" },
       el("span", { class: "generate-card-title" },
         upToDate ? "Plan ready for next week" : "Generate next week's plan"),
       el("span", { class: "generate-card-target muted" }, `target: ${target}`),
     ),
+    renderGenerateSummary(state, target),
+    el("label", {
+      class: "generate-context-label muted",
+      for: "generate-context-ta",
+    }, "Anything to consider this week? (optional)"),
+    el("textarea", {
+      id: "generate-context-ta",
+      class: "generate-context",
+      rows: "3",
+      placeholder: "e.g. tweaked left elbow Friday, travel Wed-Thu",
+      disabled: inFlight ? "" : null,
+    }, state.generateContext || ""),
     el("button", {
       class: "btn-primary generate-btn",
       disabled: inFlight ? "" : null,
@@ -700,10 +720,94 @@ function renderGeneratePlanCard(state, render, target, upToDate) {
       ? el("p", { class: "generate-error" }, state.agentJobError)
       : null,
     job && job.status === "succeeded"
-      ? el("p", { class: "generate-ok muted" },
-          `Done in ${elapsedS}s. Plan refreshed.`)
+      ? el("div", { class: "generate-done" },
+          el("p", { class: "generate-ok muted" },
+            `Done in ${elapsedS}s. Plan refreshed.`),
+          rationale ? el("p", { class: "generate-rationale" },
+            el("span", { class: "generate-rationale-label muted" }, "Why "),
+            rationale) : null,
+        )
       : null,
   );
+}
+
+function ensureGeneratePreview(state, render, target) {
+  const cur = state.generatePreview;
+  if (cur && cur.weekStart === target && (cur.loading || cur.data || cur.error)) return;
+  state.generatePreview = { weekStart: target, loading: true, data: null, error: null };
+  getGeneratePlanPreview(state.apiBase, target)
+    .then((data) => {
+      if (state.generatePreview && state.generatePreview.weekStart === target) {
+        state.generatePreview = { weekStart: target, loading: false, data, error: null };
+        render();
+      }
+    })
+    .catch((err) => {
+      if (state.generatePreview && state.generatePreview.weekStart === target) {
+        state.generatePreview = {
+          weekStart: target, loading: false, data: null, error: err.message,
+        };
+        render();
+      }
+    });
+}
+
+function renderGenerateSummary(state, target) {
+  const cur = state.generatePreview;
+  if (!cur || cur.weekStart !== target) {
+    return el("p", { class: "generate-summary muted" }, "Loading inputs…");
+  }
+  if (cur.loading) {
+    return el("p", { class: "generate-summary muted" }, "Loading inputs…");
+  }
+  if (cur.error) {
+    return el("p", { class: "generate-summary muted" },
+      `Couldn't load preview: ${cur.error}`);
+  }
+  const d = cur.data;
+  const goalCount = (d.goals || []).length;
+  const trackCount = (d.tracks || []).length;
+  const eventCount = (d.events || []).length;
+  const profileTag = d.profile ? "profile ✓" : "profile —";
+  const ltpTag = d.long_term ? "LTP ✓" : "LTP —";
+  return el("div", { class: "generate-summary-wrap" },
+    el("p", { class: "generate-summary muted" },
+      `Using: ${goalCount} goals · ${trackCount} tracks · ${eventCount} events (4w) · ${profileTag} · ${ltpTag}`),
+    el("details", { class: "generate-inputs" },
+      el("summary", { class: "muted" }, "Show inputs"),
+      renderGenerateInputs(d),
+    ),
+  );
+}
+
+function renderGenerateInputs(d) {
+  const block = (title, body) => el("section", { class: "generate-inputs-section" },
+    el("h5", { class: "generate-inputs-h" }, title),
+    el("pre", { class: "generate-inputs-pre" }, body),
+  );
+  const goalsBody = (d.goals || []).length
+    ? JSON.stringify(d.goals, null, 2)
+    : "(none)";
+  const tracksBody = (d.tracks || []).length
+    ? (d.tracks || []).map((t) => `${t.slug} — ${t.display}`).join("\n")
+    : "(none)";
+  return el("div", {},
+    block("Profile", formatMaybeMarkdown(d.profile)),
+    block("Long-term plan", formatMaybeMarkdown(d.long_term)),
+    block(`Goals (${(d.goals || []).length})`, goalsBody),
+    block(`Tracks (${(d.tracks || []).length})`, tracksBody),
+    block(`Recent events (last 4 weeks: ${(d.events || []).length})`,
+      (d.events || []).length
+        ? `Most recent: ${d.events[d.events.length - 1].local_date}`
+        : "(none)"),
+  );
+}
+
+function formatMaybeMarkdown(body) {
+  if (!body) return "(none)";
+  if (typeof body === "string") return body;
+  if (typeof body.markdown === "string") return body.markdown;
+  return JSON.stringify(body, null, 2);
 }
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -711,15 +815,19 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 async function generatePlan(state, render, week_start) {
   const apiBase = state.apiBase;
   const start = Date.now();
+  const ta = document.getElementById("generate-context-ta");
+  state.generateContext = ta ? ta.value : (state.generateContext || "");
   state.agentJobError = null;
   state.agentJob = { status: "queued", _local_started: start };
   render();
 
+  const context = state.generateContext.trim();
+  const input = context ? { week_start, context } : { week_start };
   let job;
   try {
     job = await postAgentJob(apiBase, {
       kind: "generate_plan",
-      input: { week_start },
+      input,
     });
   } catch (err) {
     state.agentJob = null;
@@ -1503,6 +1611,8 @@ async function bootstrap() {
     settingsSection: storedSettingsSection(),
     agentJob: null,
     agentJobError: null,
+    generatePreview: null,
+    generateContext: "",
     editingGoalId: null,
     editingTrackId: null,
   };
